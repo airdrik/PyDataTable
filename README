@@ -19,9 +19,9 @@ Includes the following modules:
 	Replaces the list-of-dict model with a dict-of-lists model.  This comes with some trade-offs in
 	terms of performance (some operations may be faster, some will be slower), but otherwise the 
 	capabilities are the same
+* datatable_diff - module used for diffing two DataTable objects.
 * hierarchies - an alternative hierarchical representation of data - each level in the hierarchy is
 	a specific key with the nodes of that level containing the values for that key.
-* datatable_diff - module used for diffing two DataTable objects.
 * myxml - pythonic xml parser/representation that I wrote, representing the xml document as a collection
 	of nodes, attributes accessible using bracket-notation, and children using dot-notation.  
 	Includes searching for children and desendents and filtering of collected nodes.
