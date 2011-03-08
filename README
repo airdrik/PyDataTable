@@ -27,3 +27,5 @@ Includes the following modules:
 	Includes searching for children and desendents and filtering of collected nodes.
 	Used by DataTable primarily for xml (de)serialization (may not be the best too for the job - open to 
 	suggestions).
+
+If you have any suggestions, please contact me at airdrik@gmail.com
