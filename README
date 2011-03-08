@@ -1,0 +1,15 @@
+PyDataTable is intended to provide a representation similar to a database table - a list of table rows 
+	where each row contains a set of key-value pairs, sharing common keys (internally represented by a 
+	list of dicts).  It includ several capabilities common to database tables as well as many other 
+	nice-to-have capabilities.  
+Some of the capabilities include:	
+	Selecting columns - including filtering selected columns by column content and adding columns populated by the result of some expression
+	Filtering rows by some criteria
+	Joining multiple tables (including database table-join, and concatenating rows)
+	bucketing and aggregating of bucketed results
+	de-duplication (e.g. select distinct)
+	sorting
+	diffing of two tables
+	
+
+
