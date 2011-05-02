@@ -77,7 +77,7 @@ Value may be one of the following:
 		groups = defaultdict(lambda:0)
 		for v in self:
 			groups[v] += 1
-		return groups
+		return dict(groups)
 	def fillDownBlanks(self):
 		prev = None
 		for i in range(len(self.__data)):
@@ -418,28 +418,31 @@ Parameters:
 		return self.filter(lambda row: matchCount[tuple(row[field] for field in fields)])
 	def _distinct(self):
 		rows = set()
-		for row in self:
-			items = tuple(sorted(row.iteritems()))
-			if items not in rows:
-				yield row
-				rows.add(items)
+		for i, row in enumerate(zip(self.__headers.values())):
+			if row not in rows:
+				yield i
+				rows.add(row)
 	def distinct(self):
 		'''return a new DataTable with only unique rows'''
-		return DataTable(self._distinct())
+		return self.select(self._distinct())
 	def fillDownBlanks(self, *fields):
 		'''fills in the blanks in the current table such that each blank field in a row is filled in with the first non-blank entry in the column before it'''
 		if not fields:
 			fields = self.headers()
 		for field in fields:
 			self.__headers[field].fillDownBlanks()
-	def pivot(self):
+	def pivot(self, rowID=lambda dataTable, i: 'Row%d' % i):
 		'''Returns a new DataTable with the rows and columns swapped
 In the resulting table, the headers from the previous table will be in the 'Field' column,
 	then each row will be in the column Row0, Row1, ... RowN
+	optional rowID is either a column to be used as the row identifier (fields in that column become new column headers), 
+or a method which takes a table (this table) and the row index and returns the column header corresponding with that row
 		'''
+		if isinstance(rowID, str):
+			rowID = lambda dataTable, i: dataTable.column(rowID)[i]
 		return DataTable([DataColumn(None, 'Field', sorted(self.__headers.iterkeys()))] + 
 						[DataColumn(None, 
-								'Row%d' % i, 
+								rowID(self, i), 
 								(self.__headers[h][i] for h in sorted(self.__headers.iterkeys()))) for i in range(len(self))])
 	def aggregate(self, groupBy, aggregations={}):
 		'''return an aggregation of the data grouped by a given set of fields.

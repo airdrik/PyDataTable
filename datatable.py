@@ -66,7 +66,7 @@ Value may be one of the following:
 		groups = defaultdict(lambda:0)
 		for v in self:
 			groups[v] += 1
-		return groups
+		return dict(groups)
 	def fillDownBlanks(self):
 		prev = None
 		for i in range(len(self)):
@@ -456,8 +456,9 @@ Parameters:
 		return self.filter(lambda row: matchCount[tuple(row[field] for field in fields)])
 	def _distinct(self):
 		rows = set()
+		headers = self.headers()
 		for row in self:
-			items = tuple(sorted(row.iteritems()))
+			items = tuple(row[h] for h in headers)
 			if items not in rows:
 				yield row
 				rows.add(items)
@@ -470,14 +471,19 @@ Parameters:
 			fields = self.headers()
 		for field in fields:
 			self.__headers[field].fillDownBlanks()
-	def pivot(self):
+	def pivot(self, rowID=lambda dataTable, i: 'Row%d' % i):
 		'''Returns a new DataTable with the rows and columns swapped
 In the resulting table, the headers from the previous table will be in the 'Field' column,
 	then each row will be in the column Row0, Row1, ... RowN
+	optional rowID is either a column to be used as the row identifier (fields in that column become new column headers), 
+or a method which takes a table (this table) and the row index and returns the column header corresponding with that row
 		'''
+		if isinstance(rowID, str):
+			rowID = lambda dataTable, i: dataTable[i][rowID]
+		rowIDs = [rowID(self, i) for i in range(len(self))]
 		def tempIterRows():
 			for header,  column in sorted(self.__headers.iteritems()):
-				row = AttributeDict(('Row%d' % i,  v) for i,v in enumerate(column))
+				row = AttributeDict(zip(rowIDs, column))
 				row['Field'] = header
 				yield row
 		return DataTable(tempIterRows())
