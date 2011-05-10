@@ -328,7 +328,7 @@ Overwrites existing columns'''
 		'''returns a copy of this DataTable with all of the blank columns removed'''
 		blanks = [h for h,col in self.__headers.iteritems() if not any(col)]
 		return self ^ blanks
-	def sort(self, *fields):
+	def sorted(self, *fields):
 		data = list(self)
 		def mycmp(row1, row2):
 			for field in fields:
@@ -340,8 +340,13 @@ Overwrites existing columns'''
 					return cmp(row1[field], row2[field])
 			return 0
 		data.sort(cmp = mycmp)
+		return DataTable(data)
+	def sort(self, *fields):
+		'''returns a new copy of the data table sorted'''
+		other = self.sorted(*fields)
 		for h in self.__headers.keys():
-			self.__headers[h] = DataColumn(self, h, data)
+			self.__headers[h] = DataColumn(self, h, other.column(h))
+		return newData
 	def sizeOfBuckets(self, *fields):
 		'''Returns a dict of bucket -> number of items in the bucket'''
 		buckets = defaultdict(lambda:0)

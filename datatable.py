@@ -326,6 +326,11 @@ Overwrites existing columns'''
 					return cmp(row1[field], row2[field])
 			return 0
 		self.__data.sort(cmp = mycmp)
+	def sorted(self, *fields):
+		'''returns a new copy of the data table sorted'''
+		newData = DataTable(self)
+		newData.sort(*fields)
+		return newData
 	def diff(self, other, *fields, **kwds):
 #TODO: make sure these diff methods still work
 		if 'ignoreMissingFields' in kwds:
