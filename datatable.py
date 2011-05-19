@@ -186,8 +186,8 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 			other = DataTable([other])
 		if not len(self):
 			return other
-		selfNewHeaders = dict((h,'') for h in other.headers() if h not in self.headers())
-		otherNewHeaders = dict((h,'') for h in self.headers() if h not in other.headers())
+		selfNewHeaders = dict((h, None) for h in other.headers() if h not in self.headers())
+		otherNewHeaders = dict((h, None) for h in self.headers() if h not in other.headers())
 		return (self & selfNewHeaders) + (other & otherNewHeaders)
 	def __add__(self, other):
 		'''Join two DataTable instances (concatenate their rows)
