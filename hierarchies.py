@@ -166,16 +166,19 @@ would return:
 
 {}
 '''
+		if self == {}:
+			return self
 		ret = Hierarchy()
 		for k,v in self.iteritems():
 			clean = v.cleanHierarchy(cleanLeaf)
 			if clean is not None:
 				ret[k] = clean
-		if not any(ret.values()):
-			return cleanLeaf(ret)
 		if not ret:
 			return None
+		if not any(ret.values()):
+			return cleanLeaf(ret)
 		return ret
+
 	def __iter__(self):
 		for k,v in sorted(self.iteritems()):
 			h = k.asDict()
@@ -216,6 +219,7 @@ would return:
 		# @type theXML XmlNode
 		for node in theXML.children():
 			hierarchy[HierarchyKey(node.name, node['value'])] = Hierarchy.fromXML(node)
+		return hierarchy
 	def combineKeys(self):
 		'''
 		reduces the depth of the hierarchy by merging the nodes with one child with that child
@@ -309,15 +313,17 @@ would return:
 
 {}
 	'''
+	if h == {}:
+		return h
 	ret = AttributeDict()
 	for k,v in h.iteritems():
 		clean = cleanHierarchy(v, cleanLeaf)
 		if clean is not None:
 			ret[k] = clean
-	if not [v for v in ret.values() if v]:
-		return cleanLeaf(ret)
 	if not ret:
 		return None
+	if not any(v for v in ret.values()):
+		return cleanLeaf(ret)
 	return ret
 
 def iterHierarchy(hierarchy):
@@ -363,3 +369,24 @@ def combineKeys(hierarchy):
 				v = v.values()[0]
 			copy[t] = combineKeys(v)
 	return copy
+
+def diff(fromTable, toTable, buckets=None):
+	'''
+	p is the production (from) profile (or the latest execution from such a profile - may be the profileID)
+	t is the test (to) profile (or latest execution from such a profile).  If t is None, expects p to be a profileID and will populate p and t from production and test accordingly
+	buckets is the fields to bucket the results (should be the set of fields which uniquely identifies an entity).  May be left out if p is a profile or profileID
+	ignored is a list of fields to filter out of the results completely (defaults to ID and NormalizationExecutionID)
+	reconDate is an optional date if p (and t) are profiles (or profileIDs)
+	'''
+	if fromTable is None:
+		return 'No Production data'
+	if toTable is None:
+		return 'No test data'
+	res = (fromTable & {'_results':'From'}).augment(toTable & {'_results':'To'})
+	diffHeaders = (tuple(b for b in buckets if b in res.headers())+ tuple(h for h in res.headers() if h not in buckets + ('_results',)) + ('_results',))
+	h = Hierarchy.fromTable(res, *diffHeaders)
+	def cleanLeaf(h):
+		if h == {'From':{},'To':{}}:
+			return None
+		return h
+	return h.cleanHierarchy(cleanLeaf) or {}
