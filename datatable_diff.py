@@ -1,4 +1,5 @@
 from collections import defaultdict
+from datatable import DataTable
 
 class Result:
 	'''
@@ -67,16 +68,16 @@ fields is a list of fields to check and possibly remove
 		'''
 		if any(field not in self.__data for field in fields):
 			return
-		f, t = (AttributeDict((field, self.__data[field]['From']) for field in fields),AttributeDict((field, self.__data[field]['To']) for field in fields)):
+		f, t = (AttributeDict((field, self.__data[field]['From']) for field in fields),AttributeDict((field, self.__data[field]['To']) for field in fields))
 		if filterMethod(fromRow,toRow):
 			for field in fields:
 				del self.__data[field]
 	def __repr__(self):
-		return 'Result(%s) # from rows: %d, to rows: %d' % (repr(self.key), self.fromRow and len(self.fromRow) or 0, self.toRow and len(self.toRow) or 0)
+		return 'Result(%s) # from rows: %d, to rows: %d' % (repr(self.key), len(self.fromRow) if self.fromRow else 0, len(self.toRow) if self.toRow else 0)
 	def __str__(self):
 		if self.__data:
 			return '%s\t\t%s' % (self.key, self.__data)
-		return '%s\t\From: %s\tTo: %s' % (self.key, self.fromRow and len(self.fromRow) or 0, self.toRow and len(self.toRow) or 0)
+		return '%s\t\From: %s\tTo: %s' % (self.key, len(self.fromRow) if self.fromRow else 0, len(self.toRow) if self.toRow else 0)
 	def dataKeys(self):
 		return self.__data.keys()
 	def getLengths(self):
@@ -151,7 +152,7 @@ filterMethod is a method which takes two parameters (the fromRow and toRow versi
 		for result in self:
 			result.checkRemove(field, filterMethod)
 			if not result:
-				del self.__data[result.key]
+				del self[result]
 	def checkRemove_multiField(self, filterMethod, *fields):
 		'''
 		remove the set of fields from each result if filterMethod returns true for those entries.  Removes any result which has no more inline differences
@@ -161,7 +162,7 @@ fields is a list of fields to check and possibly remove
 		for result in self:
 			result.checkRemove_multiField(filterMethod, *fields)
 			if not result:
-				del self.__data[result.key]
+				del self[result]
 	def originalFromRows(self):
 		'''return the original rows being diffed from'''
 		def getRows():
@@ -200,7 +201,7 @@ def diff(fromTable, toTable, buckets):
 		if fromBucket and toBucket and len(fromBucket) == len(toBucket):
 			for fromRow, toRow in zip(fromBucket, toBucket):
 				results += Result(key, buckets, DataTable(fromRow), DataTable(toRow))
-		else
+		else:
 			results += Result(key, buckets, fromBucket, toBucket)
 	
 	return results
@@ -222,7 +223,7 @@ data lines:   bucket, field_from, field_to, field_from, field_to...
 		yield "Buckets don't match number of rows:"
 		yield results.formatKeyFields(keyMaxLengths) + ' From Rows    To Rows'
 		for result in mismatch:
-			yield result.formatKeys(keyMaxLengths) + ' %-12d %-12d' % (result.fromRows and len(result.fromRows) or 0, result.toRows and len(result.toRows) or 0)
+			yield result.formatKeys(keyMaxLengths) + ' %-12d %-12d' % (len(result.fromRow) if result.fromRow else 0, len(result.toRow) if result.toRow else 0)
 	results = results.filter(lambda result: result.fromRow and result.toRow and len(result.fromRow) == len(result.toRow))
 	if not results:
 		yield 'No inline differences'
