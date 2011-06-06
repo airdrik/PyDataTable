@@ -347,6 +347,7 @@ Overwrites existing columns'''
 		for h in self.__headers.keys():
 			self.__headers[h] = DataColumn(self, h, other.column(h))
 		return newData
+
 	def sizeOfBuckets(self, *fields):
 		'''Returns a dict of bucket -> number of items in the bucket'''
 		buckets = defaultdict(lambda:0)
@@ -465,3 +466,7 @@ Parameters:
 					row[field] = aggMethod(bucket)
 				yield row
 		return DataTable(tempIter())
+	def renameColumn(self, column, newName):
+		self.__headers[newName] = self.__headers[column]
+		del self.__headers[column]
+		self.__headers[newName].header = newName

@@ -508,6 +508,12 @@ Parameters:
 					row[field] = aggMethod(bucket)
 				yield row
 		return DataTable(tempIter())
+	def renameColumn(self, column, newName):
+		for row in self:
+			row[newName] = row[column]
+			del row[column]
+		self.__headers[newName] = DataColumn(self, newName)
+		del self.__headers[column]
 
 def diffToTable(diffResults, keyHeaders):
 	data = []
