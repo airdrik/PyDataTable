@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datatable import DataTable
+from datatable import DataTable, AttributeDict
 
 class Result:
 	'''
@@ -58,7 +58,7 @@ filterMethod is a method which takes two parameters (the fromRow and toRow versi
 		'''
 		if field in self.__data:
 			f, t = self.__data[field]['From'], self.__data[field]['To']
-			if filterMethod(a,b):
+			if filterMethod(f, t):
 				del self.__data[field]
 	def checkRemove_multiField(self, filterMethod, *fields):
 		'''
@@ -68,7 +68,7 @@ fields is a list of fields to check and possibly remove
 		'''
 		if any(field not in self.__data for field in fields):
 			return
-		f, t = (AttributeDict((field, self.__data[field]['From']) for field in fields),AttributeDict((field, self.__data[field]['To']) for field in fields))
+		fromRow, toRow = (AttributeDict((field, self.__data[field]['From']) for field in fields),AttributeDict((field, self.__data[field]['To']) for field in fields))
 		if filterMethod(fromRow,toRow):
 			for field in fields:
 				del self.__data[field]
@@ -77,7 +77,7 @@ fields is a list of fields to check and possibly remove
 	def __str__(self):
 		if self.__data:
 			return '%s\t\t%s' % (self.key, self.__data)
-		return '%s\t\From: %s\tTo: %s' % (self.key, len(self.fromRow) if self.fromRow else 0, len(self.toRow) if self.toRow else 0)
+		return '%s\tFrom: %s\tTo: %s' % (self.key, len(self.fromRow) if self.fromRow else 0, len(self.toRow) if self.toRow else 0)
 	def dataKeys(self):
 		return self.__data.keys()
 	def getLengths(self):
@@ -143,6 +143,9 @@ Provides filtering, iterating over the results and pretty-printing.
 			result.ignoreField(field)
 			if not result:
 				del self[result]
+	def changedFields(self):
+		'''return the list of fields which changed'''
+		return sorted(set(h for result in self for h in result.dataKeys()))
 	def checkRemove(self, field, filterMethod):
 		'''
 		remove the field from each result if filterMethod returns true for the fromRow, toRow pairs.  Removes any result which has no more inline differences
@@ -200,7 +203,7 @@ def diff(fromTable, toTable, buckets):
 			toBucket = None
 		if fromBucket and toBucket and len(fromBucket) == len(toBucket):
 			for fromRow, toRow in zip(fromBucket, toBucket):
-				results += Result(key, buckets, DataTable(fromRow), DataTable(toRow))
+				results += Result(key, buckets, DataTable([fromRow]), DataTable([toRow]))
 		else:
 			results += Result(key, buckets, fromBucket, toBucket)
 	
