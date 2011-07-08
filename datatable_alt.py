@@ -437,13 +437,17 @@ Parameters:
 			fields = self.headers()
 		for field in fields:
 			self.__headers[field].fillDownBlanks()
-	def pivot(self, rowID=lambda dataTable, i: 'Row%d' % i):
+	def pivot(self, rowID=None):
 		'''Returns a new DataTable with the rows and columns swapped
 In the resulting table, the headers from the previous table will be in the 'Field' column,
 	then each row will be in the column Row0, Row1, ... RowN
 	optional rowID is either a column to be used as the row identifier (fields in that column become new column headers), 
 or a method which takes a table (this table) and the row index and returns the column header corresponding with that row
 		'''
+		if rowID is None:
+			digits = len(str(len(self)))
+			format = 'Row%0' + str(digits) + 'd'
+			rowID = lambda dataTable, i: 'Row%d' % i
 		if isinstance(rowID, str):
 			rowID = lambda dataTable, i: dataTable.column(rowID)[i]
 		return DataTable([DataColumn(None, 'Field', sorted(self.__headers.iterkeys()))] + 
