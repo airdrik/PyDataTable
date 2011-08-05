@@ -364,16 +364,16 @@ from the string until it encounters the appropriate closing tag.
 			s += '/>'
 		s += self.__post
 		return s
-	def normalizeSpaces(self, newLineStr = '\n', indentStr = '\t', indentLevel = 0):
-		'''normalizeSpaces(newLineStr = '\n', indentStr = '\t', indentLevel = 0)
+	def normalizeSpaces(self, newLineStr='\n', indentStr='\t', indentLevel=0):
+		'''normalizeSpaces(self, newLineStr='\n', indentStr='\t', indentLevel=0)
 	normalizes the whitespace around all of the tags using the given newline and indent strings.
 	indentLevel is the starting indentation for this node's inner text, primarily used for successive indentation'''
 		for i in range(len(self.__innerText)):
 			self.__innerText[i] = self.__innerText[i].strip() + newLineStr + indentStr * indentLevel
-		for node in self.iterChildren():
+		for node in self.children():
 			node.normalizeSpaces(newLineStr, indentStr, indentLevel + 1)
-	def prettyPrint(self, newLineStr = '\n', indentStr = '\t'):
-		'''prettyPrint(newLine = '\n', indent = '\t')
+	def prettyPrint(self, newLineStr='\n', indentStr='\t'):
+		'''prettyPrint(self, newLineStr='\n', indentStr='\t')
 	returns a version of the xmlNode with all whitespace around tags normalized so that new tags are always on new lines, 
 as are closing tags if there is at least one newLineStr in the innerXml of that node.
 	Child nodes are indented 1 indentStr further than their parent node'''
