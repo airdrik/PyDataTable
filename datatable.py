@@ -486,7 +486,7 @@ or a method which takes a table (this table) and the row index and returns the c
 		if rowID is None:
 			digits = len(str(len(self)))
 			format = 'Row%0' + str(digits) + 'd'
-			rowID = lambda dataTable, i: 'Row%d' % i
+			rowID = lambda dataTable, i: format % i
 		if isinstance(rowID, str):
 			rowID = lambda dataTable, i: dataTable[i][rowID]
 		rowIDs = [rowID(self, i) for i in range(len(self))]
