@@ -1,6 +1,7 @@
 from datatable_util import AttributeDict
 from datatable import DataTable
 from myxml import XmlNode
+import csv
 
 def parseFixedWidth(f, headers):
 	'''
@@ -10,7 +11,7 @@ headers are a list of the tuples: (name, start, end),
 	start is the (1-based) index of the beginning of the column and 
 	end is the index of the end of the column
 '''
-	headers = [(header[0],int(header[1])-1,int(header[2])) for header in headers]
+	headers = [(header[0], int(header[1])-1, int(header[2])) for header in headers]
 	def parse():
 		for line in f:
 			d = AttributeDict()
@@ -19,7 +20,7 @@ headers are a list of the tuples: (name, start, end),
 			yield d
 	return DataTable(parse())
 
-def parseCsv(f,headers=None,sep=',', quot='"'):
+def parseCsv(f, headers=None, sep=',', quot='"'):
 	return DataTable(AttributeDict(line) for line in csv.DictReader(f, fieldnames=headers, delimiter=sep, quotechar=quot))
 
 def fromXML(s):
