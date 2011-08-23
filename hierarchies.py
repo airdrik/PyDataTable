@@ -27,6 +27,7 @@ would be represented by the following hierarchy:
 
 '''
 from myxml import XmlNode
+from datatable_util import AttributeDict
 
 def __flatten(l):
 	for i in l:
@@ -38,22 +39,6 @@ def __flatten(l):
 
 def flatten(*l):
 	return tuple(__flatten(l))
-
-class AttributeDict(dict):
-	'''
-	Subclass of dict that allows access to items using dot-notation:
-d = AttributeDict()
-d['a'] = 1
-print d.a # 1
-	'''
-	def __add__(self, other):
-		d = dict(self)
-		d.update(other)
-		return AttributeDict(d)
-	def __getattr__(self, key):
-		return super(AttributeDict, self).__getitem__(key)
-	def __setattr__(self, key, value):
-		return super(AttributeDict, self).__setitem__(key, value)
 
 class HierarchyKey(object):
 	'''

@@ -1,10 +1,23 @@
-from collections import defaultdict
-from hierarchies import AttributeDict, makeHierarchyFromTable
+class AttributeDict(dict):
+	'''
+	Subclass of dict that allows access to items using dot-notation:
+d = AttributeDict()
+d['a'] = 1
+print d.a # 1
+	'''
+	def __iadd__(self, other):
+		self.update(other)
+	def __add__(self, other):
+		d = AttributeDict(self)
+		d += other
+		return d
+	def __getattr__(self, key):
+		return super(AttributeDict, self).__getitem__(key)
+	def __setattr__(self, key, value):
+		return super(AttributeDict, self).__setitem__(key, value)
 
 class DataTableException(Exception):
 	pass
-
-import types
 
 def CSV(it):
 	'''Takes an iterator which yields dicts with common keys and returns a CSV string for that data'''
@@ -40,7 +53,7 @@ def XML(it):
 	'''
 	x = myxml.XmlNode(name='table')
 	for row in it:
-		x.appendChild(myxml.XmlNode(name='row', **dict((k,unicode(v)) for k,v in row.iteritems() if v is not None)))
+		x.appendChild(myxml.XmlNode(name='row', **dict((k, unicode(v)) for k, v in row.iteritems() if v is not None)))
 	return x.prettyPrint()
 
 #The following are column filters.  Typical usage:
