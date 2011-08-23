@@ -131,7 +131,7 @@ Another DataTable instance, which will create a deep copy
 A string which may be parsed into one of the previous by calling parseMethod on the string.
 '''
 		if isinstance(data, DataTable):
-			self.__headers = AttributeDict((h,DataColumn(self, c)) for h,c in data.__headers.items())
+			self.__headers = AttributeDict((h,DataColumn(self, c)) for h, c in data.__headers.items())
 			self.__length = len(data)
 			return
 		if isinstance(data, str) or isinstance(data, unicode):
@@ -151,11 +151,11 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 			return
 		if isinstance(data[0], dict):
 			headers = reduce(set.union, (row.keys() for row in data), set())
-			self.__headers = AttributeDict((h,DataColumn(self, h, data)) for h in sorted(headers))
+			self.__headers = AttributeDict((h, DataColumn(self, h, data)) for h in sorted(headers))
 		else:
 			headers = data.pop(0)
 			data = [AttributeDict((headers[i], row[i]) for i in range(len(headers))) for row in data]
-			self.__headers = AttributeDict((h,DataColumn(self, h, data)) for h in headers)
+			self.__headers = AttributeDict((h, DataColumn(self, h, data)) for h in headers)
 		self.__length = len(data)
 	def getRow(self, index):
 		return AttributeDict((h, self.__headers[h][index]) for h in self.__headers.keys())
@@ -193,7 +193,7 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 	Accepts either a dictionary of header -> value which does exact matching on the pairs, 
 	or a filter function which takes a dict as input and returns if that row should be included'''
 		if isinstance(filterFunction, dict):
-			return self.select(i for i in range(len(self)) if all(self.column(k)[i] == v for k,v in filterFunction.iteritems()))
+			return self.select(i for i in range(len(self)) if all(self.column(k)[i] == v for k, v in filterFunction.iteritems()))
 		return DataTable(line for line in self if filterFunction(line))
 	def __len__(self):
 		'''The number of rows'''
@@ -274,7 +274,7 @@ Overwrites existing columns'''
 	def __iand__(self, other):
 		'''Add columns to the data tabel using the dictionary keys from other as the new headers and their values as fields on each row
 Overwrites existing columns'''
-		for header,value in other.items():
+		for header, value in other.items():
 			data = []
 			if isinstance(value, types.FunctionType):
 				data = [value(row) for row in self]
@@ -326,7 +326,7 @@ Overwrites existing columns'''
 		return self
 	def removeBlankColumns(self):
 		'''returns a copy of this DataTable with all of the blank columns removed'''
-		blanks = [h for h,col in self.__headers.iteritems() if not any(col)]
+		blanks = [h for h, col in self.__headers.iteritems() if not any(col)]
 		return self ^ blanks
 	def sorted(self, *fields):
 		data = list(self)
@@ -346,7 +346,7 @@ Overwrites existing columns'''
 		other = self.sorted(*fields)
 		for h in self.__headers.keys():
 			self.__headers[h] = DataColumn(self, h, other.column(h))
-		return newData
+		return self
 
 	def sizeOfBuckets(self, *fields):
 		'''Returns a dict of bucket -> number of items in the bucket'''
@@ -361,7 +361,7 @@ Overwrites existing columns'''
 		for i in range(len(self)):
 			key = tuple(self.__headers[field][i] for field in fields)
 			buckets[key].append(i)
-		return AttributeDict((key, self.select(indices)) for key,indices in buckets.iteritems())
+		return AttributeDict((key, self.select(indices)) for key, indices in buckets.iteritems())
 	def join(self, other, joinParams,  otherFieldPrefix='',  leftJoin=True,  rightJoin=False):
 		'''
 dataTable.join(otherTable, joinParams, otherFieldPrefix='')
@@ -402,7 +402,7 @@ Parameters:
 				for otherRow in other:
 					key = tuple(otherRow[field] for field in joinParams.values())
 					if key not in seenKeys:
-						newRow = AttributeDict((otherFieldPrefix+k, v) for k,v in otherRow.iteritems())
+						newRow = AttributeDict((otherFieldPrefix+k, v) for k, v in otherRow.iteritems())
 						for header in self.headers():
 							newRow[header] = None
 						yield newRow
@@ -446,8 +446,8 @@ or a method which takes a table (this table) and the row index and returns the c
 		'''
 		if rowID is None:
 			digits = len(str(len(self)))
-			format = 'Row%0' + str(digits) + 'd'
-			rowID = lambda dataTable, i: format % i
+			fmt = 'Row%0' + str(digits) + 'd'
+			rowID = lambda dataTable, i: fmt % i
 		if isinstance(rowID, str):
 			rowID = lambda dataTable, i: dataTable.column(rowID)[i]
 		return DataTable([DataColumn(None, 'Field', sorted(self.__headers.iterkeys()))] + 
