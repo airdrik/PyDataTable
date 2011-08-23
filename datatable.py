@@ -1,4 +1,7 @@
-from datatable_util import types, AttributeDict, defaultdict, makeHierarchyFromTable, DataTableException, CSV, FIXEDWIDTH
+import types
+from collections import defaultdict
+from datatable_util import AttributeDict, DataTableException, CSV, FIXEDWIDTH
+from hierarchies import makeHierarchyFromTable
 
 class DataColumn(object):
 	def __init__(self, dataTable, header):
@@ -109,7 +112,7 @@ Another DataTable instance, which will create a deep copy
 A string which may be parsed into one of the previous by calling parseMethod on the string.
 '''
 		if isinstance(data, DataTable):
-			self.__headers = AttributeDict((h,DataColumn(self, c)) for h,c in data.__headers.items())
+			self.__headers = AttributeDict((h, DataColumn(self, c)) for h, c in data.__headers.items())
 			self.__data = [AttributeDict((h.header, row[h.header]) for h in self.__headers.values()) for row in data]
 			return
 		if isinstance(data, str) or isinstance(data, unicode):
@@ -125,7 +128,7 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 			return
 		if isinstance(data[0], dict):
 			headers = reduce(set.union, (row.keys() for row in data), set())
-			self.__headers = AttributeDict((h,DataColumn(self, h)) for h in sorted(headers))
+			self.__headers = AttributeDict((h, DataColumn(self, h)) for h in sorted(headers))
 			for row in data:
 				for header in self.__headers.keys():
 					if header not in row:
@@ -133,7 +136,7 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 			self.__data = [AttributeDict(row) for row in data]
 		else:
 			headers = data.pop(0)
-			self.__headers = AttributeDict((h,DataColumn(self, h)) for h in headers)
+			self.__headers = AttributeDict((h, DataColumn(self, h)) for h in headers)
 			self.__data = [AttributeDict(zip(headers, row)) for row in data]
 	def __iter__(self):
 		'''Gets an iterator over the data rows'''
@@ -143,7 +146,7 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 		if '__iter__' in dir(index):
 			return DataTable(self[i] for i in index)
 		data = self.__data[index]
-		if isinstance(data,list):
+		if isinstance(data, list):
 			return DataTable(data)
 		return data
 	def column(self, header):
@@ -164,7 +167,7 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 	Accepts either a dictionary of header -> value which does exact matching on the pairs, 
 	or a filter function which takes a dict as input and returns if that row should be included'''
 		if isinstance(filterFunction, dict):
-			return DataTable(line for line in self.__data if all(line[k] == v for k,v in filterFunction.iteritems()))
+			return DataTable(line for line in self.__data if all(line[k] == v for k, v in filterFunction.iteritems()))
 		return DataTable(line for line in self.__data if filterFunction(line))
 	def __len__(self):
 		'''The number of rows'''
@@ -331,60 +334,6 @@ Overwrites existing columns'''
 		newData = DataTable(self)
 		newData.sort(*fields)
 		return newData
-	def diff(self, other, *fields, **kwds):
-#TODO: make sure these diff methods still work
-		if 'ignoreMissingFields' in kwds:
-			ignoreMissingFields=kwds['ignoreMissingFields']
-		else:
-			ignoreMissingFields=True
-		sBucket = self.bucket(*fields)
-		oBucket = other.bucket(*fields)
-		allBuckets = sorted(set(sBucket.keys()).union(oBucket.keys()))
-		results = DataTable()
-		for bucket in allBuckets:
-			if bucket not in sBucket:
-				results += oBucket[bucket] & {'__DiffStatus': "Added"}
-			elif bucket not in oBucket:
-				results += sBucket[bucket] & {'__DiffStatus': "Removed"}
-			elif not ignoreMissingFields or len(sBucket[bucket]) != len(oBucket[bucket]):
-				#figure out which lines are new in each buckets
-				for s in sBucket[bucket]:
-					o = oBucket[bucket].filter(filterFunction = lambda row: row == s)
-					if o:
-						oBucket[bucket].__data.remove(o[0])
-					else:
-						s = AttributeDict(s)
-						s['__DiffStatus'] = "Removed"
-						results += s
-				for o in oBucket[bucket]:
-					o = AttributeDict(o)
-					o['__DiffStatus'] = "Added"
-					results += o
-		return results
-	def diff1(self, other, buckets, fieldsToExclude=None, fieldsToPropagate=None):
-#TODO: make sure these diff methods still work
-		if fieldsToExclude is None:
-			fieldsToExclude = []
-		if fieldsToPropagate is None:
-			fieldsToPropagate = []
-		fieldsToPropagate.append('_results')
-		s = (self ^ fieldsToExclude) & {'_results':'self'}
-		o = (other ^ fieldsToExclude) & {'_results':'other'}
-		if set(self.headers()).symmetric_difference(other.headers()):
-			raise DataTableException("Headers don't match.  You may want to include the headers that are missing in this or other in fieldsToExclude")
-		res = s + o
-		results = {}
-		#split the data into buckets
-		for k, bucket in res.bucket(*(b for b in buckets if b in res.headers())).iteritems():
-			if len(bucket) >= 2:
-				#extract the fields that are different between the two data tables
-				tmp = dict((h,list(bucket.column(h))) for h in bucket.headers() if len(set(bucket.column(h))) != 1 or h in fieldsToPropagate)
-				#all buckets will retain the _results field
-				if tmp and any(k for k in tmp.keys() if k not in fieldsToPropagate):
-					results[k] = tmp
-			else:
-				results[k] = bucket[0]['_results'] + ' Only'
-		return results
 	def sizeOfBuckets(self, *fields):
 		'''Returns a dict of bucket -> number of items in the bucket'''
 		buckets = defaultdict(lambda:0)
@@ -399,7 +348,7 @@ Overwrites existing columns'''
 			key = tuple(data[field] for field in fields)
 			buckets[key].append(data)
 		return AttributeDict((key, DataTable(bucket)) for key, bucket in buckets.iteritems())
-	def join(self, other, joinParams,  otherFieldPrefix='',  leftJoin=True,  rightJoin=False):
+	def join(self, other, joinParams, otherFieldPrefix='', leftJoin=True, rightJoin=False):
 		'''
 dataTable.join(otherTable, joinParams, otherFieldPrefix='')
 	returns a new table with rows in the first table joined with rows in the second table, using joinParams to map fields in the first to fields in the second
@@ -439,7 +388,7 @@ Parameters:
 				for otherRow in other:
 					key = tuple(otherRow[field] for field in joinParams.values())
 					if key not in seenKeys:
-						newRow = AttributeDict((otherFieldPrefix+k, v) for k,v in otherRow.iteritems())
+						newRow = AttributeDict((otherFieldPrefix+k, v) for k, v in otherRow.iteritems())
 						for header in self.headers():
 							newRow[header] = None
 						yield newRow
@@ -485,8 +434,8 @@ or a method which takes a table (this table) and the row index and returns the c
 		'''
 		if rowID is None:
 			digits = len(str(len(self)))
-			format = 'Row%0' + str(digits) + 'd'
-			rowID = lambda dataTable, i: format % i
+			fmt = 'Row%0' + str(digits) + 'd'
+			rowID = lambda dataTable, i: fmt % i
 		if isinstance(rowID, str):
 			rowID = lambda dataTable, i: dataTable[i][rowID]
 		rowIDs = [rowID(self, i) for i in range(len(self))]
@@ -521,14 +470,14 @@ Parameters:
 
 def diffToTable(diffResults, keyHeaders):
 	data = []
-	for k,v in diffResults.iteritems():
-		if isinstance(v,dict):
+	for k, v in diffResults.iteritems():
+		if isinstance(v, dict):
 			for i in range(len(v.values()[0])):
-				d = dict(zip(keyHeaders,k))
-				d.update(dict((h,r[i]) for h,r in v.iteritems()))
+				d = dict(zip(keyHeaders, k))
+				d.update(dict((h, r[i]) for h, r in v.iteritems()))
 				data.append(d)
 		else:
-			d = dict(zip(keyHeaders,k))
+			d = dict(zip(keyHeaders, k))
 			d['_results'] = v
 			data.append(d)
 	return DataTable(data)
