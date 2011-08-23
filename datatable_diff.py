@@ -35,8 +35,6 @@ Contains the key for this bucket (may be used to find the rows in the original f
 			return cmp(self.key, other.key)
 		if isinstance(other, tuple):
 			return cmp(self.key, other)
-		if isinstance(other, dict):
-			return cmp(self.keyDict, other)
 	def comparable(self):
 		return bool(self.__data)
 	def __nonzero__(self):
@@ -68,8 +66,8 @@ fields is a list of fields to check and possibly remove
 		'''
 		if any(field not in self.__data for field in fields):
 			return
-		fromRow, toRow = (AttributeDict((field, self.__data[field]['From']) for field in fields),AttributeDict((field, self.__data[field]['To']) for field in fields))
-		if filterMethod(fromRow,toRow):
+		fromRow, toRow = (AttributeDict((field, self.__data[field]['From']) for field in fields), AttributeDict((field, self.__data[field]['To']) for field in fields))
+		if filterMethod(fromRow, toRow):
 			for field in fields:
 				del self.__data[field]
 	def __repr__(self):
@@ -83,7 +81,7 @@ fields is a list of fields to check and possibly remove
 	def getLengths(self):
 		return [len('%s' % k) for k in self.key]
 	def formatKeys(self, lengths):
-		return ', '.join(('% ' + str(l) + 's') % k for l,k in zip(lengths, self.key)) + ' |'
+		return ', '.join(('% ' + str(l) + 's') % k for l, k in zip(lengths, self.key)) + ' |'
 		
 class ResultSet:
 	'''
@@ -134,7 +132,7 @@ Provides filtering, iterating over the results and pretty-printing.
 		candidates = [self.keyFields] + [result.key for result in self]
 		return [max(len('%s' % row[i]) for row in candidates) for i in range(len(self.keyFields))]
 	def formatKeyFields(self, lengths):
-		return ', '.join(('% ' + str(l) + 's') % k for l,k in zip(lengths, self.keyFields)) + ' |'
+		return ', '.join(('% ' + str(l) + 's') % k for l, k in zip(lengths, self.keyFields)) + ' |'
 	def pick(self):
 		'''Returns a (somewhat) random result object'''
 		return self.__data.itervalues().next()[0]
@@ -239,13 +237,13 @@ data lines:   bucket, field_from, field_to, field_from, field_to...
 		maxLens[i*2+1] = len(headers[i])
 	for result in results:
 		buckets = [result.formatKeys(keyMaxLengths)]
-		for i,h in enumerate(headers):
+		for i, h in enumerate(headers):
 			if h in result:
 				maxLens[i*2+1] = max(maxLens[i*2+1], len(str(result[h]['From'])))
 				maxLens[i*2+2] = max(maxLens[i*2+2], len(str(result[h]['To'])))
 				buckets += [result[h]['From'], result[h]['To']]
 			else:
-				buckets += ['','']
+				buckets += ['', '']
 		resultList.append(buckets)
 	maxLens = [str(m+1) for m in maxLens]
 	linePattern = '%-' + 's%-'.join(maxLens) + 's'
