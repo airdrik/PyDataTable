@@ -27,6 +27,8 @@ class Sum(AggregateMethod):
 		return sum(bucket.column(self.field))
 
 class Count:
+	def __init__(self):
+		pass
 	def __call__(self, bucket):
 		return len(bucket)
 
@@ -91,7 +93,7 @@ class Max(AggregateMethod):
 	def __call__(self, bucket):
 		return max(bucket.column(self.field))
 
-class Span:
+class Span(AggregateMethod):
 	'''return the difference between the greatest and the least'''
 	def __call__(self, bucket):
 		return max(bucket.column(self.field)) - min(bucket.column(self.field))
