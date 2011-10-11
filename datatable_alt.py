@@ -1,4 +1,7 @@
-from datatable_util import types, AttributeDict, defaultdict, makeHierarchyFromTable, DataTableException, CSV, FIXEDWIDTH
+import types
+from collections import defaultdict
+from datatable_util import AttributeDict, DataTableException, CSV, FIXEDWIDTH
+from hierarchies import makeHierarchyFromTable
 
 class DataColumn(object):
 	def __init__(self, dataTable, header, data=[]):
