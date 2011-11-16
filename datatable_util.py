@@ -20,7 +20,7 @@ class DataTableException(Exception):
 
 def CSV(it):
 	'''Takes an iterator which yields dicts with common keys and returns a CSV string for that data'''
-	l = [line for line in it]
+	l = list(it)
 	if not l:
 		return ''
 	def quoteField(field):
@@ -33,11 +33,11 @@ def CSV(it):
 
 def FIXEDWIDTH(it):
 	'''Takes an iterator which yields dicts with common keys and returns a fixed-width formatted string (primarily for printing)'''
-	l = [row for row in it]
+	l = list(it)
 	if not l:
 		return ''
 	headers = sorted(l[0].keys())
-	l = [tuple(headers)] + [tuple(str(row[h]) for h in headers) for row in l]
+	l = [tuple(str(v) for v in row) for row in [tuple(headers)] + [tuple(row[h] for h in headers) for row in l]]
 	maxLengths = [str(max(len(row[i]) for row in l)) for i in range(len(headers))]
 	if maxLengths:
 		formatStr = '%-' + 's %-'.join(maxLengths) + 's'
@@ -52,15 +52,20 @@ def XML(it):
 	'''
 	x = myxml.XmlNode(name='table')
 	for row in it:
-		x.appendChild(myxml.XmlNode(name='row', **dict((k, unicode(v)) for k, v in row.iteritems() if v is not None)))
+		x.appendChild(myxml.XmlNode(name='row', **dict((unicode(k), unicode(v)) for k, v in row.iteritems() if v is not None)))
 	return x.prettyPrint()
+
+import json
+def JSON(it):
+	'''Takes an iterater of dicts and returns a json string'''
+	return json.dumps([dict((unicode(k), unicode(v)) for k, v in row.iteritems()) for row in it])
 
 #The following are column filters.  Typical usage:
 # dt = DataTable(...)
 # withoutEmptyColumns = dt ^ emptyColumns
 noneColumns = lambda c: set(c) == set([None])
 emptyColumns = lambda c: not any(c)
-hasValueColumns = lambda c: any(f for f in c)
+hasValueColumns = lambda c: any(c)
 singleValueColumns = lambda c: len(set(c)) == 1
 
 #The following is a convenience method for stripping out the newlines in a field. Typical usage:
