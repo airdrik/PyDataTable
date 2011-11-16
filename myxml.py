@@ -36,6 +36,7 @@ lines and \t for indentation).
 xml in python.  XmlNode ignores w3c and is a quick-and-dirty way of parsing xml so you can 
 do stuff with it.  
 '''
+from collections import defaultdict
 
 entities = [('quot', '"'),
 	('apos', "'"),
@@ -69,55 +70,82 @@ class XmlParseError(Exception):
 
 class XmlTagList(list):
 	pass
+
+class State:
+	'''
+simulate a state machine with 5 states for walking through the xml string
+State is the base class providing simplified access to the current xml string
+the subclasses represent individual states whose "next" method is called to determine what to do next
+state changes are performed by calling the "to" method with the new state (sets the current class to the given state)
+'''
+	def __init__(self, xmlString):
+		self.xmlString = xmlString
+		self.idx = 0
+		self.prevIdx = 0
+		self.tags = XmlTagList()
+		self.quoteChar = ''
+		self.escape = False
+	def next(self):
+		pass
+	def parseTags(self):
+		while self.idx < len(self.xmlString):
+			self.next()
+			self.idx += 1
+		self.appendTag(False)
+		return self.tags
+	def nextChar(self):
+		return self.xmlString[self.idx]
+	def currentContent(self, includingCurrentChar=True):
+		return self.xmlString[self.prevIdx:self.idx+(1 if includingCurrentChar else 0)]
+	def appendTag(self, includingCurrentChar=True):
+		self.tags.append(self.currentContent(includingCurrentChar))
+		self.prevIdx = self.idx+(1 if includingCurrentChar else 0)
+	def to(self, newState):
+		self.__class__ = newState
+		
+class OutsideState(State):
+	def next(self):
+		if self.nextChar() == '<':
+			self.appendTag(False)
+			self.to(InsideState)
+class InsideState(State):
+	def next(self):
+		if self.currentContent() == '<!--':
+			self.to(InCommentState)
+		elif self.currentContent() == '<![CDATA[':
+			self.to(InCDataState)
+		elif self.nextChar() in '"\'':
+			self.quoteChar = self.nextChar()
+			self.to(InQuoteState)
+		elif self.nextChar() == '>':
+			self.appendTag()
+			self.to(OutsideState)
+class InQuoteState(State):
+	def next(self):
+		if self.nextChar() == '\\':
+			self.escape = not self.escape
+		else:
+			self.escape = False
+		if self.nextChar() == self.quoteChar and not self.escape:
+			self.to(InsideState)
+class InCommentState(State):
+	def next(self):
+		if self.currentContent().endswith('-->'):
+			self.appendTag()
+			self.to(OutsideState)
+class InCDataState(State):
+	def next(self):
+		if self.currentContent().endswith(']]>'):
+			self.appendTag()
+			self.to(OutsideState)
+
 def splitAllTags(xmlString):
 	'''splitAllTags(xmlString)
 	splits up the tags and the inner text.  Returns a list of tagString,innerText,tagString,,, etc.
 	If there is nothing between two tags splitAllTags will insert a '' between the two for consistency
-'''
-	#simulate a state machine with 5 states for walking through the xml string
-	OUTSIDE, INSIDE, INQUOTE, INCOMMENT, INCDATA = 1,2,3,4,5
-	escape = False
-	j = 0
-	tags = XmlTagList()
-	state = OUTSIDE
-	for i in range(len(xmlString)):
-		if xmlString[i] == '\\':
-			escape = not escape
-		else:
-			escape = False
-		if state == OUTSIDE and xmlString[i] == '<':
-			tag = xmlString[j:i]
-			tags.append(tag)
-			j = i
-			state = INSIDE
-		elif state == INSIDE and xmlString[j:i+1] == '<!--':
-			state = INCOMMENT
-		elif state == INCOMMENT and xmlString[j:i+1].endswith('-->'):
-			tag = xmlString[j:i+1]
-			tags.append(tag)
-			j = i+1
-			state = OUTSIDE
-		elif state == INSIDE and xmlString[j:i+1] == '<![CDATA[':
-			state = INCDATA
-		elif state == INCDATA and xmlString[j:i+1].endswith(']]>'):
-			tag = xmlString[j:i+1]
-			tags.append(tag)
-			j = i+1
-			state = OUTSIDE
-		elif state == INSIDE and xmlString[i] in '"\'':
-			state = INQUOTE
-			quoteChar = xmlString[i]
-		elif state == INQUOTE and xmlString[i] == quoteChar and not escape:
-			state = INSIDE
-		elif state == INSIDE and xmlString[i] == '>':
-			tag = xmlString[j:i+1]
-			tags.append(tag)
-			j = i+1
-			state = OUTSIDE
-	tag = xmlString[j:]
-	if tag.strip():
-		tags.append(tag)
-	return tags
+'''		
+	state = OutsideState(xmlString)
+	return state.parseTags()
 
 def splitTag(xmlTagString):
 	'''splitTag(xmlTagString)
@@ -292,7 +320,7 @@ from the string until it encounters the appropriate closing tag.
 		if not len(self.__innerText):
 			return None
 		s = ''
-		for i,child in enumerate(self.__childNodes):
+		for i, child in enumerate(self.__childNodes):
 			s += xmlEscape(self.__innerText[i]) + str(child)
 		return s + xmlEscape(self.__innerText[-1])
 	def outerXml(self):
@@ -343,7 +371,10 @@ from the string until it encounters the appropriate closing tag.
 			return False
 		raise TypeError
 	def __repr__(self):
-		return 'XmlNode: ' + self.name + '.\tAttributes: ' + str(self.__attributes)
+		childCounts = defaultdict(lambda: 0)
+		for child in self.__childNodes:
+			childCounts[child.name] += 1
+		return 'XmlNode: %s.\tAttributes: %s,\tChildren: %s' % (self.name, self.__attributes, ', '.join('%s: %d' % (name, count) for name,count in childCounts.items()))
 	def __str__(self):
 		'''str(xmlNode)
 	returns the entire contents of this node, including this node's tags and all inner text and tags
@@ -384,7 +415,7 @@ as are closing tags if there is at least one newLineStr in the innerXml of that 
 		if not len(self.__innerText):
 			return s + '/>'
 		innerXml = xmlEscape(self.__innerText[0].strip())
-		for i,child in enumerate(self.__childNodes):
+		for i, child in enumerate(self.__childNodes):
 			innerXml += newLineStr + child.prettyPrint()
 			if self.__innerText[i+1].strip():
 				innerXml += newLineStr + self.__innerText[i + 1].strip()
@@ -435,7 +466,7 @@ as are closing tags if there is at least one newLineStr in the innerXml of that 
 
 def bucket(pairs):
 	buckets = {}
-	for k,v in pairs:
+	for k, v in pairs:
 		buckets.setdefault(k, []).append(v)
 	return buckets
 
@@ -456,20 +487,20 @@ class XmlDiff(XmlNode):
 			raise Exception("Can't diff two None's")
 		if xml1 is None or xml2 is None or xml1.name != xml2.name:
 			self.name = 'xml_diff'
-			self.__children = (xml1,xml2)
+			self.__children = (xml1, xml2)
 			self._different = True
 			return
 		self.name = xml1.name
 		for attribute in xml1.attributes():
 			if not xml2.containsAttribute(attribute):
-				self.__attributes[attribute] = xml1[attribute],None
+				self.__attributes[attribute] = xml1[attribute], None
 				self._different = True
 			elif xml1[attribute] != xml2[attribute]:
-				self.__attributes[attribute] = xml1[attribute],xml2[attribute]
+				self.__attributes[attribute] = xml1[attribute], xml2[attribute]
 				self._different = True
 		for attribute in xml2.attributes():
 			if not xml1.containsAttribute(attribute):
-				self.__attributes[attribute] = None,xml2[attribute]
+				self.__attributes[attribute] = None, xml2[attribute]
 				self._different = True
 		bucket1 = bucket((node.name, node) for node in xml1.children())
 		bucket2 = bucket((node.name, node) for node in xml2.children())
@@ -477,20 +508,26 @@ class XmlDiff(XmlNode):
 			if name not in bucket1:
 				for node in bucket2[name].values():
 					self.appendChild(XmlDiff(None, node))
+					self._different = True
 			elif name not in bucket2:
 				for node in bucket1[name].values():
 					self.appendChild(XmlDiff(node, None))
+					self._different = True
 			else:
 				children1 = iter(bucket1[name])
 				children2 = iter(bucket2[name])
 				for child1 in children1:
 					try:
 						child2 = children2.next()
-						self.appendChild(XmlDiff(child1, child2))
+						childDiff = XmlDiff(child1, child2)
+						if childDiff._different:
+							self.appendChild(childDiff)
 					except StopIteration:
 						self.appendChild(XmlDiff(child1, None))
+						self._different = True
 				for child2 in children2:
 					self.appendChild(XmlDiff(None, child2))
+					self._different = True
 				
 
 class XmlNodeList(object):
@@ -523,11 +560,14 @@ class XmlNodeList(object):
 			searchFunction = lambda node: node.containsAttribute(attribute)
 		return self.where(searchFunction)
 	def withChildNode(self, nodeName = None, searchFunction = None):
-		if nodeName is None and searchFunction is None:
-			searchFunction = lambda node: True
-		if nodeName is not None:
-			searchFunction = lambda node: node.name == nodeName and searchFunction(node)
-		return self.where(lambda node: any(child for child in node.children() if searchFunction(child)))
+		search = lambda node: True
+		if searchFunction:
+			search = lambda node: searchFunction(node)
+		elif nodeName:
+			search = lambda node: node.name == nodeName
+		elif searchFunction and nodeName:
+			search = lambda node: node.name == nodeName and searchFunction(node)
+		return self.where(lambda node: any(child for child in node.children() if search(child)))
 	def where(self, searchFunction):
 		return XmlNodeList(node for node in self if searchFunction(node))
 	def named(self, nodeName):
