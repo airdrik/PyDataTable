@@ -5,16 +5,15 @@ d = AttributeDict()
 d['a'] = 1
 print d.a # 1
 	'''
+	def __init__(self, *args, **vargs):
+		super(AttributeDict, self).__init__(*args, **vargs)
+		self.__dict__ = self
 	def __iadd__(self, other):
 		self.update(other)
 	def __add__(self, other):
 		d = AttributeDict(self)
 		d += other
 		return d
-	def __getattr__(self, key):
-		return super(AttributeDict, self).__getitem__(key)
-	def __setattr__(self, key, value):
-		return super(AttributeDict, self).__setitem__(key, value)
 
 class DataTableException(Exception):
 	pass
@@ -68,4 +67,5 @@ singleValueColumns = lambda c: len(set(c)) == 1
 # dt = DataTable(...)
 # print dt & replaceNewLines('field name')
 replaceNewLines = lambda header: {header: lambda row: row[header].replace('\n','|')}
-
+#swaps a column containing xml strings with myxml XmlNodes
+makeXml = lambda header: {header: lambda row: myxml.XmlNode(row[header])}
