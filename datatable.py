@@ -348,18 +348,20 @@ Overwrites existing columns'''
 			key = tuple(data[field] for field in fields)
 			buckets[key].append(data)
 		return AttributeDict((key, DataTable(bucket)) for key, bucket in buckets.iteritems())
-	def join(self, other, joinParams, otherFieldPrefix='', leftJoin=True, rightJoin=False):
+	def join(self, other, joinParams=None, otherFieldPrefix='', leftJoin=True, rightJoin=False):
 		'''
 dataTable.join(otherTable, joinParams, otherFieldPrefix='')
 	returns a new table with rows in the first table joined with rows in the second table, using joinParams to map fields in the first to fields in the second
 Parameters:
 	other - the table to join
-	joinParams - a dictionary of <field in self> to <field in other>
+	joinParams - a dictionary of <field in self> to <field in other>. Defaults to "natural join", merging common headers
 	otherFieldPrefix - a string to prepend to the fields added from the second table
 	leftJoin - whether to include items in self which are not in other (default: True)
 	rightJoin - whether to include items in other which are not in self (default: False)
 		'''
-		if not isinstance(joinParams, dict):
+		if joinParams is None:
+			joinParams = dict((h,h) for h in self.headers() if h in other.headers())
+		elif not isinstance(joinParams, dict):
 			raise Exception("joinParams must be a dictionary of <field in self> to <field in other>")
 		
 		newHeaders = other.headers()
