@@ -63,7 +63,7 @@ def attrQuote(attr):
 def attrUnQuote(attr):
 	q = attr[0]
 	attr = xmlUnEscape(attr)[1:-1]
-	return attr.replace('\\'+q, q)
+	return attr.replace('\\' + q, q)
 
 class XmlParseError(Exception):
 	pass
@@ -143,7 +143,7 @@ def splitAllTags(xmlString):
 	'''splitAllTags(xmlString)
 	splits up the tags and the inner text.  Returns a list of tagString,innerText,tagString,,, etc.
 	If there is nothing between two tags splitAllTags will insert a '' between the two for consistency
-'''		
+'''
 	state = OutsideState(xmlString)
 	return state.parseTags()
 
@@ -185,7 +185,7 @@ splits up a tag into tagName, attributeDict, tail
 		if parts[-1].rstrip('/>'):
 			tail = parts.pop()
 			lastAttr = tail.rstrip('/>')
-			parts += [lastAttr, tail[tail.rindex(lastAttr[-1])+1:]]
+			parts += [lastAttr, tail[tail.rindex(lastAttr[-1]) + 1:]]
 		attrs = {}
 		for part in parts[1:-1]:
 #			if '=' not in part:
@@ -193,7 +193,7 @@ splits up a tag into tagName, attributeDict, tail
 			attr, val = part.split('=', 1)
 			if val[0] in '"\'':
 				q = val[0]
-				if q in val[1:-1].replace('\\'+q, ''):
+				if q in val[1:-1].replace('\\' + q, ''):
 					raise XmlParseError("Error parsing xml tag: extra quote found in attribute value: " + xmlTagString)
 			elif '"' in val or "'" in val:
 				raise XmlParseError("Error parsing xml tag: quote found in unquoted attribute value: " + xmlTagString)
@@ -207,7 +207,7 @@ splits up a tag into tagName, attributeDict, tail
 		print parts
 		raise XmlParseError("Error parsing xml tag: %s:%s" % (e.message, xmlTagString), e)
 
-def indent(xmlString, newLineStr = '\n', indentation = '\t'):
+def indent(xmlString, newLineStr='\n', indentation='\t'):
 	'''indent(string, newLineStr = '\n', indentation = '\t')
 indents each line in the string'''
 	return newLineStr.join(indentation + line for line in xmlString.split(newLineStr))
@@ -237,8 +237,8 @@ exluding this node's tags
 		self.__innerText = []
 		self.parent = None
 		return self
-		
-	def __init__(self, xmlDocument = None, *nodes, **attributes):
+
+	def __init__(self, xmlDocument=None, *nodes, **attributes):
 		'''XmlNode(xmlDocument = None)
 	Initializes a new XmlNode object and parses xmlDocument (if provided)
 	xmlDocument may be a file-like object with a 'read' method, in which case it will parse whatever 
@@ -320,7 +320,7 @@ from the string until it encounters the appropriate closing tag.
 		if not len(self.__innerText):
 			return None
 		s = ''
-		for i, child in enumerate(self.__childNodes):
+		for i,child in enumerate(self.__childNodes):
 			s += xmlEscape(self.__innerText[i]) + str(child)
 		return s + xmlEscape(self.__innerText[-1])
 	def outerXml(self):
@@ -346,6 +346,8 @@ from the string until it encounters the appropriate closing tag.
 		'''xmlNode[attribute] = value
 	Allow access to the node's attributes and name through the subscript notation.'''
 		self.__attributes[attribute] = value
+	def __delitem__(self, attribute):
+		del self.__attributes[attribute]
 	def __getattr__(self, nodeName):
 		'''xmlNode.nodeName
 	returns this node's child node(s) matching the given node name.
@@ -374,7 +376,7 @@ from the string until it encounters the appropriate closing tag.
 		childCounts = defaultdict(lambda: 0)
 		for child in self.__childNodes:
 			childCounts[child.name] += 1
-		return 'XmlNode: %s.\tAttributes: %s,\tChildren: %s' % (self.name, self.__attributes, ', '.join('%s: %d' % (name, count) for name,count in childCounts.items()))
+		return 'XmlNode: %s.\tAttributes: %s,\tChildren: %s' % (self.name, self.__attributes, ', '.join('%s: %d' % (name, count) for name, count in childCounts.items()))
 	def __str__(self):
 		'''str(xmlNode)
 	returns the entire contents of this node, including this node's tags and all inner text and tags
@@ -415,9 +417,9 @@ as are closing tags if there is at least one newLineStr in the innerXml of that 
 		if not len(self.__innerText):
 			return s + '/>'
 		innerXml = xmlEscape(self.__innerText[0].strip())
-		for i, child in enumerate(self.__childNodes):
+		for i,child in enumerate(self.__childNodes):
 			innerXml += newLineStr + child.prettyPrint()
-			if self.__innerText[i+1].strip():
+			if self.__innerText[i + 1].strip():
 				innerXml += newLineStr + self.__innerText[i + 1].strip()
 		if innerXml:
 			if newLineStr in innerXml:
@@ -463,6 +465,25 @@ as are closing tags if there is at least one newLineStr in the innerXml of that 
 		self.__innerText.append('')
 		self.__childNodes.append(childNode)
 		childNode.parent = self
+	def removeNode(self, child):
+		if child not in self.__childNodes:
+			return
+		i = self.__childNodes.index(child)
+		del self.__childNodes[i]
+		sit = self.__innerText
+		cit = child.__innerText
+		if len(cit) == 1:
+			self.__innerText = sit[:i] + [sit[i] + cit[0] + sit[i + 1]] + sit[i + 2:]
+		else:
+			self.__innerText = sit[:i] + [sit[i] + cit[0]] + cit[1:-1] + [cit[-1] + sit[i + 1]] + sit[i + 2:]
+		self.__childNodes = self.__childNodes[:i] + child.__childNodes + self.__childNodes[i:]
+	def removeChildWithContent(self, child):
+		if child not in self.__childNodes:
+			return
+		i = self.__childNodes.index(child)
+		del self.__childNodes[i]
+		self.__innerText[i] += self.__innerText[i + 1]
+		del self.__innerText[i + 1]
 
 def bucket(pairs):
 	buckets = {}
@@ -502,8 +523,7 @@ class XmlDiff(XmlNode):
 			if not xml1.containsAttribute(attribute):
 				self.__attributes[attribute] = None, xml2[attribute]
 				self._different = True
-		bucket1 = bucket((node.name, node) for node in xml1.children())
-		bucket2 = bucket((node.name, node) for node in xml2.children())
+		bucket1, bucket2 = (bucket((node.name, node) for node in x.children()) for x in (xml1, xml2))
 		for name in set(bucket1.keys()).union(bucket2.keys()):
 			if name not in bucket1:
 				for node in bucket2[name].values():
@@ -528,11 +548,11 @@ class XmlDiff(XmlNode):
 				for child2 in children2:
 					self.appendChild(XmlDiff(None, child2))
 					self._different = True
-				
+
 
 class XmlNodeList(object):
 	def __init__(self, nodeList):
-		self.__nodeList = [node for node in nodeList]
+		self.__nodeList = list(nodeList)
 	def __repr__(self):
 		return 'XmlNodeList.  Length: %d' % len(self)
 	def find(self, criteria=None):
@@ -553,16 +573,16 @@ class XmlNodeList(object):
 				yield node
 			for descendant in node.find(searchFunction):
 				yield descendant
-	def withAttribute(self, attribute, attributeValue = None):
+	def withAttribute(self, attribute, attributeValue=None):
 		if attributeValue is not None:
 			searchFunction = lambda node: node.containsAttribute(attribute) and node[attribute] == attributeValue
 		else:
 			searchFunction = lambda node: node.containsAttribute(attribute)
 		return self.where(searchFunction)
-	def withChildNode(self, nodeName = None, searchFunction = None):
+	def withChildNode(self, nodeName=None, searchFunction=None):
 		search = lambda node: True
 		if searchFunction:
-			search = lambda node: searchFunction(node)
+			search = searchFunction
 		elif nodeName:
 			search = lambda node: node.name == nodeName
 		elif searchFunction and nodeName:
@@ -601,7 +621,7 @@ class XmlNodeList(object):
 		newList += other
 		return newList
 	def __iadd__(self, other):
-		self.__nodeList += [node for node in other]
+		self.__nodeList += list(other)
 	def __contains__(self, node):
 		return node in self.__nodeList
 	def sort(self, cmp=None, key=None):
