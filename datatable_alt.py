@@ -3,6 +3,16 @@ from collections import defaultdict
 from datatable_util import AttributeDict, DataTableException, CSV, FIXEDWIDTH
 from hierarchies import makeHierarchyFromTable
 
+class JoinType:
+	def __init__(self, leftOuter, rightOuter):
+		self.leftOuter = leftOuter
+		self.rightOuter = rightOuter
+
+INNER_JOIN = JoinType(False, False)
+RIGHT_OUTER_JOIN = JoinType(False, True)
+LEFT_OUTER_JOIN = JoinType(True, False)
+OUTER_JOIN = JoinType(True, True)
+
 class DataColumn(object):
 	def __init__(self, dataTable, header, data=[]):
 		self.__dataTable = dataTable
@@ -90,6 +100,8 @@ Value may be one of the following:
 				self.__data[i] = prev
 	def __repr__(self):
 		return "DataColumn(<dataTable>, '%s')" % self.header
+	def __str__(self):
+		return ','.join(map(str, self))
 
 class NullColumn(DataColumn):
 	def __filter(self, value):
@@ -301,7 +313,7 @@ Overwrites existing columns'''
 				if other(column):
 					del self.__headers[column.header]
 			return self
-		if isinstance(other, str):
+		if other in self.__headers:
 			other = [other]
 		for key in other:
 			if key not in self.__headers:
@@ -320,7 +332,7 @@ Overwrites existing columns'''
 				if not other(column):
 					del self.__headers[column.header]
 			return self
-		if isinstance(other, str):
+		if other in self.__headers:
 			other = [other]
 		for key in self.__headers.keys():
 			if key in other:
@@ -365,7 +377,7 @@ Overwrites existing columns'''
 			key = tuple(self.__headers[field][i] for field in fields)
 			buckets[key].append(i)
 		return AttributeDict((key, self.select(indices)) for key, indices in buckets.iteritems())
-	def join(self, other, joinParams=None,  otherFieldPrefix='',  leftJoin=True,  rightJoin=False):
+	def join(self, other, joinParams=None,  otherFieldPrefix='',  joinType=LEFT_OUTER_JOIN):
 		'''
 dataTable.join(otherTable, joinParams, otherFieldPrefix='')
 	returns a new table with rows in the first table joined with rows in the second table, using joinParams to map fields in the first to fields in the second
@@ -373,8 +385,7 @@ Parameters:
 	other - the table to join
 	joinParams - a dictionary of <field in self> to <field in other>. Defaults to "natural join", merging common headers
 	otherFieldPrefix - a string to prepend to the fields added from the second table
-	leftJoin - whether to include items in self which are not in other (default: True)
-	rightJoin - whether to include items in other which are not in self (default: False)
+	joinType - the instance of JoinType which indicates if items should be included from one data table which aren't in the other
 		'''
 		if joinParams is None:
 			joinParams = dict((h,h) for h in self.headers() if h in other.headers())
@@ -393,7 +404,7 @@ Parameters:
 				key = tuple(row[field] for field in joinParams.keys())
 				seenKeys.add(key)
 				if key not in otherBuckets:
-					if leftJoin:
+					if joinType.leftOuter:
 						for header in newHeaders:
 							newRow[otherFieldPrefix+header] = None
 						yield newRow
@@ -403,13 +414,15 @@ Parameters:
 					for header in newHeaders:
 						newRow[otherFieldPrefix+header] = otherRow[header]
 					yield AttributeDict(newRow)
-			if rightJoin:
+			if joinType.rightOuter:
+				joinParamReversed = dict((v,k) for k,v in joinParams.items())
 				for otherRow in other:
 					key = tuple(otherRow[field] for field in joinParams.values())
 					if key not in seenKeys:
-						newRow = AttributeDict((otherFieldPrefix+k, v) for k, v in otherRow.iteritems())
+						newRow = AttributeDict((joinParamReversed[k] if k in joinParamReversed else otherFieldPrefix+k, v) for k, v in otherRow.iteritems())
 						for header in self.headers():
-							newRow[header] = None
+							if header not in joinParams:
+								newRow[header] = None
 						yield newRow
 		return DataTable(tempJoin())
 	def writeTo(self, fileName):
