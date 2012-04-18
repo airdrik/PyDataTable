@@ -75,14 +75,6 @@ emptyColumns = lambda c: not any(c)
 hasValueColumns = lambda c: any(c)
 singleValueColumns = lambda c: len(set(c)) == 1
 
-def replaceNewLines(header):
-	'''replaceNewLines(header)
-A convenience method for stripping out the newlines in a field - replaces new lines with pipe characters. Typical usage:
-dt = DataTable(...)
-print dt & replaceNewLines('field name')
-'''
-	return {header: lambda row: row[header].replace('\n','|')}
-
 def convertColumns(columnReplacements):
 	'''given a map of column -> convertMethod, returns the appropriate dict which replaces each value for that column with convertMethod(value)
 e.g.
@@ -93,6 +85,14 @@ instead of:
 print dt & {'accountId': lambda row: int(row.accountId), 'value': lambda row: float(row.value), 'startDate': lambda row: parseDate(row.startDate)}
 	'''
 	return dict((lambda k, v: (k, lambda row: v(row[k])))(k, v) for k,v in columnReplacements.items())
+
+def replaceNewLines(header, replacement='|'):
+	'''replaceNewLines(header)
+A convenience method for stripping out the newlines in a field - replaces new lines with pipe characters. Typical usage:
+dt = DataTable(...)
+print dt & replaceNewLines('field name')
+'''
+	return convertColumns({header: lambda value: value.replace('\n', replacement)})
 
 def makeXml(header):
 	'''makeXml(header)
