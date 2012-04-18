@@ -10,6 +10,7 @@ print d.a # 1
 		self.__dict__ = self
 	def __iadd__(self, other):
 		self.update(other)
+		return self
 	def __add__(self, other):
 		d = AttributeDict(self)
 		d += other
@@ -18,18 +19,24 @@ print d.a # 1
 class DataTableException(Exception):
 	pass
 
+def _quoteField(field):
+	f = str(field)
+	if ',' in f:
+		return '"%s"' % f
+	return f
+
+
+def CSV_GivenHeaders(*headers):
+	'''takes a list of headers and returns a 'pipable' object, similar to CSV, but using the column order as specified'''
+	return lambda it: ','.join(_quoteField(h) for h in headers) + '\n' + '\n'.join(','.join(_quoteField(line[header]) for header in headers) for line in it)
+
 def CSV(it):
 	'''Takes an iterator which yields dicts with common keys and returns a CSV string for that data'''
 	l = list(it)
 	if not l:
 		return ''
-	def quoteField(field):
-		f = str(field)
-		if ',' in f:
-			return '"%s"' % f
-		return str(f)
 	headers = sorted(l[0].keys())
-	return '\n'.join([','.join(quoteField(h) for h in headers)] + [','.join(quoteField(line[header]) for header in headers) for line in l])
+	return CSV_GivenHeaders(*headers)(l)
 
 def FIXEDWIDTH(it):
 	'''Takes an iterator which yields dicts with common keys and returns a fixed-width formatted string (primarily for printing)'''
@@ -68,9 +75,28 @@ emptyColumns = lambda c: not any(c)
 hasValueColumns = lambda c: any(c)
 singleValueColumns = lambda c: len(set(c)) == 1
 
-#The following is a convenience method for stripping out the newlines in a field. Typical usage:
-# dt = DataTable(...)
-# print dt & replaceNewLines('field name')
-replaceNewLines = lambda header: {header: lambda row: row[header].replace('\n','|')}
-#swaps a column containing xml strings with myxml XmlNodes
-makeXml = lambda header: {header: lambda row: myxml.XmlNode(row[header])}
+def replaceNewLines(header):
+	'''replaceNewLines(header)
+A convenience method for stripping out the newlines in a field - replaces new lines with pipe characters. Typical usage:
+dt = DataTable(...)
+print dt & replaceNewLines('field name')
+'''
+	return {header: lambda row: row[header].replace('\n','|')}
+
+def convertColumns(columnReplacements):
+	'''given a map of column -> convertMethod, returns the appropriate dict which replaces each value for that column with convertMethod(value)
+e.g.
+dt = DataTable(...)
+print dt & convertColumns({'accountId': int, 'value': float, 'startDate': parseDate})
+
+instead of:
+print dt & {'accountId': lambda row: int(row.accountId), 'value': lambda row: float(row.value), 'startDate': lambda row: parseDate(row.startDate)}
+	'''
+	return dict((lambda k, v: (k, lambda row: v(row[k])))(k, v) for k,v in columnReplacements.items())
+
+def makeXml(header):
+	'''makeXml(header)
+swaps a column containing xml strings with myxml XmlNodes
+usage: dt = DataTable(...) & makeXml('xml column')
+'''
+	return convertColumns({header: myxml.XmlNode})
