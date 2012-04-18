@@ -423,12 +423,30 @@ as are closing tags if there is at least one newLineStr in the innerXml of that 
 				innerXml += newLineStr + self.__innerText[i + 1].strip()
 		if innerXml:
 			if newLineStr in innerXml:
-				s += '>%s\n</%s>' % (indent(innerXml, newLineStr, indentStr), self.name)
+				s += '>%s%s</%s>' % (indent(innerXml, newLineStr, indentStr), newLineStr, self.name)
 			else:
 				s += '>%s</%s>' % (innerXml, self.name)
 		else:
 			s += '/>'
 		return s + self.__post
+	def noWhiteSpace(self):
+		'''noWhiteSpace(self)
+	returns the xml string with all whitespace striped around xml tags
+		'''
+		s = self.__pre + '<' + self.name
+		if self.__attributes:
+			s += ' ' + ' '.join('%s=%s' % (attribute, attrQuote(self.__attributes[attribute])) for attribute in self.__attributes)
+			s = ''.join(s.splitlines())
+		if not len(self.__innerText):
+			return s + '/>'
+		innerXml = xmlEscape(self.__innerText[0].strip())
+		for i,child in enumerate(self.__childNodes):
+			innerXml += child.noWhiteSpace() + self.__innerText[i + 1].strip()
+		if innerXml:
+			s += '>%s</%s>' % (innerXml, self.name)
+		else:
+			s += '/>'
+		return s + self.__post.strip()
 	def children(self):
 		'''children()
 	returns a list of this node's immediate children'''
