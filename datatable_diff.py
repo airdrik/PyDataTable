@@ -1,3 +1,29 @@
+'''
+Module for comparing data in two DataTables.  
+The main entry point is the diff method which takes the two tables and the list of headers which specifies the "primary key" for the tables
+
+diff returns a ResultSet instance which contains the difference data by primary key.
+
+ResultSet contains several methods for pruning expected differences and for slicing up the results to help discover patterns in the changes:
+	ignoreField prunes all differences for the given field
+	checkRemove prunes differences for the given field which match the given predicate
+	checkRemove_multiField prunes differences which affect multiple fields (e.g. we expect the change to move some of the value from one field to another so long as the sum is the same)
+	changedFields returns the list of fields which reported differences
+	filter takes a Result predicate and returns a new ResultSet containing the matching Results
+	pick returns a (pseudo-)random Result from the ResultSet
+	original{From|To}Rows returns a DataTable containing the rows which had differences
+ResultSet also contains a few methods for formatted output:
+	repr(rs) returns a summary of the differences (the number of results in the collection)
+	str(rs) returns a concise display of the results showing specifically what changed
+	rs.printFormatted() prints a fixed-width-formatted tabular display of the results
+
+ResultSet contains a list of Result instances which represents the changes to a single key entry (which may be multiple from/to rows if the "primary key" used doesn't guarantee uniqueness)
+	fromRow and toRow represent the entire original row (or rows)
+	repr(result) returns a summary of the differences (the number of from and to rows)
+	str(result) returns the differences - if there is one fromRow and one toRow returns the collection of fields which changed, otherwise reports the number of from and to rows
+	ignoreField, checkRemove and checkRemove_multiField are also available, but should be ignored on the Result object as they are called from the ResultSet when its corresponding methods are called
+'''
+
 from collections import defaultdict
 from datatable import DataTable, AttributeDict
 
@@ -105,7 +131,7 @@ Provides filtering, iterating over the results and pretty-printing.
 	def __len__(self):
 		return len(self.__data)
 	def __iter__(self):
-		for rList in self.__data.values():
+		for key, rList in sorted(self.__data.items()):
 			for result in rList:
 				yield result
 	def __getitem__(self,  key):
@@ -166,22 +192,10 @@ fields is a list of fields to check and possibly remove
 				del self[result]
 	def originalFromRows(self):
 		'''return the original rows being diffed from'''
-		def getRows():
-			for result in self:
-				if not result.fromRow:
-					continue
-				for row in result.fromRow:
-					yield row
-		return DataTable(getRows())
+		return DataTable(row for result in self if result.fromRow for row in result.fromRow)
 	def originalToRows(self):
 		'''return the original rows being diffed to'''
-		def getRows():
-			for result in self:
-				if not result.toRow:
-					continue
-				for row in result.toRow:
-					yield row
-		return DataTable(getRows())
+		return DataTable(row for result in self if result.toRow for row in result.toRow)
 
 def diff(fromTable, toTable, buckets):
 	'''The base diff method - buckets the data and ships it off to the Result and ResultSet classes to check for in-line differences'''
