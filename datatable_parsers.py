@@ -1,6 +1,7 @@
 from datatable_util import AttributeDict
 from datatable import DataTable
 from myxml import XmlNode
+from urllib import urlopen
 import csv
 
 def parseFixedWidth(f, headers):
@@ -19,6 +20,16 @@ headers are a list of the tuples: (name, start, end),
 				d[header[0]] = line[header[1]:header[2]]
 			yield d
 	return DataTable(parse())
+
+def parseFixedWidthSpaceDelimited(f):
+	'''
+Same as parseFixedWidth, but guesses at the headers by assuming that each field has a single space before it (except the first column)
+	'''
+	lines = f.read().splitlines()
+	maxlen = max(len(line) for line in lines)
+	minlen = min(len(line) for line in lines)
+	splits = [col for col in range(minlen) if all(row[col] == ' ' for row in lines)]
+	return parseFixedWidth(lines[1:], [(lines[0][start+1:end].strip(), start+2, end) for start, end in zip([-1]+splits, splits+[len(lines[0])])])
 
 def parseCsv(f, headers=None, sep=',', quot='"'):
 	return DataTable(AttributeDict(line) for line in csv.DictReader(f, fieldnames=headers, delimiter=sep, quotechar=quot))
@@ -72,3 +83,12 @@ def fromCursor(cur, scrub=None):
 	if len(results) == 1:
 		return results[0]
 	return results
+
+def fromDataUrl(url):
+	u = urlopen(url)
+	s = u.read()
+	u.close()
+	#I could have used myxml, but that isn't very fast - just do string splitting and be done with it
+	headers = [td.split('</td>')[0] for td in s.split('<thead>')[1].split('</thead>')[0].split('<td>') if '</td>' in td]
+	data = [[td.split('</td>')[0] for td in tr.split('</tr>')[0].split('<td>') if '</td>' in td] for tr in s.split('<tbody>')[1].split('</tbody>')[0].split('<tr>') if '</tr>' in tr]
+	return DataTable(dict(zip(headers, row)) for row in data)
