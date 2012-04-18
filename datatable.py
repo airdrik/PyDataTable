@@ -72,7 +72,12 @@ Value may be one of the following:
 		'''
 		return DataTable(self.__filter(value))
 	def set(self, value):
-		self.__dataTable &= {self.header: value}
+		if isinstance(value, types.FunctionType):
+			for row in self.__dataTable:
+				row[self.header] = value(row[self.header])
+		else:
+			for row in self.__dataTable:
+				row[self.header] = value
 	def sort(self):
 		self.__dataTable.sort(self.header)
 	def sizeOfGroups(self):
@@ -103,6 +108,14 @@ class NullColumn(DataColumn):
 		return iter([])
 	def __repr__(self):
 		return "NullColumn(<dataTable>, '%s')" % self.header
+
+def _copyAndApplyOp(op):
+	def copyOp(self, *args, **kwargs):
+		newData = DataTable(self)
+		op(newData, *args, **kwargs)
+		return newData
+	copyOp.__doc__ = op.__doc__
+	return copyOp
 
 class DataTable(object):
 	@staticmethod
@@ -190,6 +203,8 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 		return self | FIXEDWIDTH
 	def __repr__(self):
 		return 'Rows:%d\nHeaders:\n%s' % (len(self), self.headers())
+	def __eq__(self, other):
+		return isinstance(other, DataTable) and len(self) == len(other) and all(a == b for a, b in zip(self, other))
 	def augment(self, other):
 		'''Join two DataTable instances (concatenate their rows)
 	if the headers don't match between the two instances then it adds blank columns to each with the headers from the other'''
@@ -204,13 +219,7 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 		selfNewHeaders = dict((h, None) for h in other.headers() if h not in self.headers())
 		otherNewHeaders = dict((h, None) for h in self.headers() if h not in other.headers())
 		return (self & selfNewHeaders) + (other & otherNewHeaders)
-	def __add__(self, other):
-		'''Join two DataTable instances (concatenate their rows)
-	requires that the headers match (or that one of self or other be empty)'''
-		newData = DataTable(self)
-		newData += other
-		return newData
-	def __iadd__(self, other):
+	def append(self, other):
 		'''Join two DataTable instances (concatenate their rows)
 	requires that the headers match (or that one of self or other be empty)'''
 		if other is None:
@@ -232,25 +241,21 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 			print "other instance unknown: %s" % other.__class__
 			raise NotImplemented
 		return self
-	def __sub__(self, other):
+	__iadd__ = append
+	__add__ = _copyAndApplyOp(append)
+	def remove(self, other):
 		'''remove the rows from other that are in self - uses exact match of rows'''
-		newData = DataTable(self)
-		newData -= other
-		return newData
-	def __isub__(self, other):
-		'''remove the rows from other that are in self - uses exact match of rows'''
-		for row in other:
-			if row in self.__data:
-				self.__data.remove(row)
-		return self
-	def __and__(self, other):
-		'''Add columns to the data tabel using the dictionary keys from other as the new headers and their values as fields on each row
-Overwrites existing columns'''
 		if isinstance(other, dict):
-			newData = DataTable(self)
-			newData &= other
-			return newData
-	def __iand__(self, other):
+			if other in self.__data:
+				self.__data.remove(other)
+		else:
+			for row in other:
+				if row in self.__data:
+					self.__data.remove(row)
+		return self
+	__isub__ = remove
+	__sub__ = _copyAndApplyOp(remove)
+	def extend(self, other):
 		'''Add columns to the data tabel using the dictionary keys from other as the new headers and their values as fields on each row
 Overwrites existing columns'''
 		for header, value in other.items():
@@ -263,16 +268,13 @@ Overwrites existing columns'''
 				for row in self.__data:
 					row[header] = value
 		return self
+	__iand__ = extend
+	__and__ = _copyAndApplyOp(extend)
 	def __or__(self, other):
 		'''Pipes the DataTable into other
 	Calls other with an iterator for the rows in self'''
 		return other(iter(self))
-	def __xor__(self, other):
-		'''remove column(s) from the data tabel'''
-		newData = DataTable(self)
-		newData ^= other
-		return newData
-	def __ixor__(self, other):
+	def exclude(self, other):
 		'''remove column(s) from the data tabel'''
 		if not self.__data:
 			return self
@@ -292,12 +294,9 @@ Overwrites existing columns'''
 			for row in self.__data:
 				del row[key]
 		return self
-	def __div__(self, other):
-		'''return new DataTable with only the columns listed in other'''
-		newData = DataTable(self)
-		newData /= other
-		return newData
-	def __idiv__(self, other):
+	__ixor__ = exclude
+	__xor__ = _copyAndApplyOp(exclude)
+	def project(self, other):
 		'''return new DataTable with only the columns listed in other'''
 		if not self.__data:
 			return self
@@ -317,6 +316,8 @@ Overwrites existing columns'''
 			for row in self.__data:
 				del row[key]
 		return self
+	__idiv__ = project
+	__div__ = _copyAndApplyOp(project)
 	def removeBlankColumns(self):
 		'''returns a copy of this DataTable with all of the blank columns removed'''
 		headers = set(self.headers())
@@ -341,11 +342,8 @@ Overwrites existing columns'''
 					return cmp(row1[field], row2[field])
 			return 0
 		self.__data.sort(cmp = mycmp)
-	def sorted(self, *fields):
-		'''returns a new copy of the data table sorted'''
-		newData = DataTable(self)
-		newData.sort(*fields)
-		return newData
+	sorted = _copyAndApplyOp(sort)
+	sorted.__doc__ = '''returns a new copy of the data table sorted'''
 	def sizeOfBuckets(self, *fields):
 		'''Returns a dict of bucket -> number of items in the bucket'''
 		buckets = defaultdict(lambda:0)
@@ -410,9 +408,8 @@ Parameters:
 		return DataTable(tempJoin())
 	def writeTo(self, fileName):
 		'''Write the contents of this DataTable to a file with the given name in the standard csv format'''
-		f = open(fileName, 'w')
-		f.write(self | CSV)
-		f.close()
+		with open(fileName, 'w') as f:
+			f.write(self | CSV)
 	def duplicates(self, *fields):
 		'''given a list of fields as keys, return a DataTable instance with the rows for which those fields are not unique'''
 		matchCount = {}
@@ -477,11 +474,18 @@ Parameters:
 				yield row
 		return DataTable(tempIter())
 	def renameColumn(self, column, newName):
+		'''rename the column in place'''
 		for row in self:
 			row[newName] = row[column]
 			del row[column]
 		self.__headers[newName] = DataColumn(self, newName)
 		del self.__headers[column]
+	def minRow(self, *fields):
+		'''return the row with the minimum value(s) in the given field(s)'''
+		return self.sorted(*fields)[0]
+	def maxRow(self, *fields):
+		'''return the row with the maximum value(s) in the given field(s)'''
+		return self.sorted(*fields)[-1]
 
 def diffToTable(diffResults, keyHeaders):
 	data = []
