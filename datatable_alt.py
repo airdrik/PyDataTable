@@ -232,6 +232,8 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 		return 'Rows:%d\nHeaders:\n%s' % (len(self), self.headers())
 	def __eq__(self, other):
 		return isinstance(other, DataTable) and len(self) == len(other) and all(a == b for a, b in zip(self, other))
+	def __ne__(self, other):
+		return not isinstance(other, DataTable) or len(self) != len(other) or any(a != b for a,b in zip(self, other))
 	def augment(self, other):
 		'''Join two DataTable instances (concatenate their rows)
 	if the headers don't match between the two instances then it adds blank columns to each with the headers from the other'''
