@@ -1,6 +1,6 @@
 import types
 from collections import defaultdict
-from datatable_util import AttributeDict, DataTableException, CSV, FIXEDWIDTH
+from datatable_util import AttributeDict, DataTableException, CSV_GivenHeaders, FIXEDWIDTH
 from hierarchies import makeHierarchyFromTable
 
 class JoinType:
@@ -83,10 +83,16 @@ Value may be one of the following:
 		'''
 		return self.__dataTable.select(self.__filter(value))
 	def set(self, value):
+		'''
+	sets the items in this column to the given value
+	If value is a function then sets each item to the result of calling value on the item
+	returns the modified datatable
+'''
 		if isinstance(value, types.FunctionType):
 			self.__data = [value(data) for data in self]
 		else:
 			self.__data = [value] * len(self)
+		return self.__dataTable
 	def sort(self):
 		self.__dataTable.sort(self.header)
 	def sizeOfGroups(self):
@@ -390,7 +396,20 @@ Parameters:
 			joinParams = dict((h,h) for h in self.headers() if h in other.headers())
 		if not isinstance(joinParams, dict):
 			raise Exception("joinParams must be a dictionary of <field in self> to <field in other>")
-		
+
+		if not other:
+			if not self or joinType in (INNER_JOIN, RIGHT_OUTER_JOIN):
+				return DataTable()
+			return self & dict((otherFieldPrefix + v, None) for v in other.headers() if v not in joinParams.values())
+		if not self:
+			if joinType in (INNER_JOIN, LEFT_OUTER_JOIN):
+				return DataTable()
+			other = DataTable(other)
+			for header in other.headers():
+				if header not in joinParams.values():
+					other.renameColumn(header, otherFieldPrefix + header)
+			return other & dict((header, None) for header in self.headers() if header not in joinParams)
+
 		newHeaders = other.headers()
 		for header in joinParams.values():
 			newHeaders.remove(header)
@@ -424,10 +443,12 @@ Parameters:
 								newRow[header] = None
 						yield newRow
 		return DataTable(tempJoin())
-	def writeTo(self, fileName):
+	def writeTo(self, fileName, *headers):
 		'''Write the contents of this DataTable to a file with the given name in the standard csv format'''
+		if not headers:
+			headers = self.headers()
 		with open(fileName, 'w') as f:
-			f.write(self | CSV)
+			f.write(self | CSV_GivenHeaders(*headers))
 	def duplicates(self, *fields):
 		'''given a list of fields as keys, return a DataTable instance with the rows for which those fields are not unique'''
 		matchCount = {}
@@ -463,12 +484,14 @@ or a method which takes a table (this table) and the row index and returns the c
 		if rowID is None:
 			digits = len(str(len(self)))
 			fmt = 'Row%0' + str(digits) + 'd'
-			rowID = lambda dataTable, i: fmt % i
-		if isinstance(rowID, str):
-			rowID = lambda dataTable, i: dataTable.column(rowID)[i]
+			getRowID = lambda dataTable, i: fmt % i
+		elif isinstance(rowID, str):
+			getRowID = lambda dataTable, i: dataTable[i][rowID]
+		else:
+			getRowID = rowID
 		return DataTable([DataColumn(None, 'Field', sorted(self.__headers.iterkeys()))] + 
 						[DataColumn(None, 
-								rowID(self, i), 
+								getRowID(self, i), 
 								(self.__headers[h][i] for h in sorted(self.__headers.iterkeys()))) for i in range(len(self))])
 	def aggregate(self, groupBy, aggregations={}):
 		'''return an aggregation of the data grouped by a given set of fields.
@@ -485,7 +508,7 @@ Parameters:
 				for field, aggMethod in aggregations.iteritems():
 					row[field] = aggMethod(bucket)
 				yield row
-		return DataTable(tempIter())
+		return DataTable(tempIter()).sorted(*groupBy)
 	def renameColumn(self, column, newName):
 		'''rename the column in place'''
 		self.__headers[newName] = self.__headers[column]
