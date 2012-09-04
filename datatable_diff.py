@@ -33,7 +33,7 @@ class Result:
 Contains the key for this bucket (may be used to find the rows in the original files), 
 	those fields which changed with the from and to values, and the actual from and to rows
 	'''
-	def __init__(self,  key,  keyFields, fromRow, toRow):
+	def __init__(self, key, keyFields, fromRow, toRow):
 		self.key = key
 		self.fromRow = fromRow
 		self.toRow = toRow
@@ -48,7 +48,7 @@ Contains the key for this bucket (may be used to find the rows in the original f
 					self.__data[h] = {'From':f[h], 'To':t[h]}
 	def __eq__(self,  other):
 		if isinstance(other,  Result):
-			return self.key == other.key
+			return self.key == other.key and self.__data == other.__data
 		if isinstance(other,  tuple):
 			return self.key == other
 		if isinstance(other,  dict):
@@ -58,7 +58,7 @@ Contains the key for this bucket (may be used to find the rows in the original f
 		if self == other:
 			return 0
 		if isinstance(other, Result):
-			return cmp(self.key, other.key)
+			return cmp(self.key, other.key) and cmp(self.__data, other.__data)
 		if isinstance(other, tuple):
 			return cmp(self.key, other)
 	def comparable(self):
@@ -163,7 +163,7 @@ Provides filtering, iterating over the results and pretty-printing.
 		'''Returns a (somewhat) random result object'''
 		return self.__data.itervalues().next()[0]
 	def ignoreField(self, field):
-		for result in self:
+		for result in list(self):
 			result.ignoreField(field)
 			if not result:
 				del self[result]
@@ -176,7 +176,7 @@ Provides filtering, iterating over the results and pretty-printing.
 field is the field to check
 filterMethod is a method which takes two parameters (the fromRow and toRow versions of the field) and returns if they can be removed from the result
 		'''
-		for result in self:
+		for result in list(self):
 			result.checkRemove(field, filterMethod)
 			if not result:
 				del self[result]
@@ -186,7 +186,7 @@ filterMethod is a method which takes two parameters (the fromRow and toRow versi
 filterMethod is a method which takes two dicts: fromRow and toRow, with those fields specified by the fields parameter and returns if those values can be removed from the result
 fields is a list of fields to check and possibly remove
 		'''
-		for result in self:
+		for result in list(self):
 			result.checkRemove_multiField(filterMethod, *fields)
 			if not result:
 				del self[result]
@@ -200,17 +200,20 @@ fields is a list of fields to check and possibly remove
 def diff(fromTable, toTable, buckets):
 	'''The base diff method - buckets the data and ships it off to the Result and ResultSet classes to check for in-line differences'''
 	#split the data into buckets
-	fromBuckets, toBuckets = (table.bucket(*(b for b in buckets if b in table.headers())) for table in (fromTable, toTable))
+	fromBucketHeaders, toBucketHeaders = ([b for b in buckets if b in table.headers()] for table in (fromTable, toTable))
+	fromSortHeaders, toSortHeaders = ([h for h in table.headers() if h not in bucketHeaders] for table, bucketHeaders in ((fromTable, fromBucketHeaders), (toTable, toBucketHeaders)))
+	
+	fromBuckets, toBuckets = (table.bucket(*bucketHeaders) for table, bucketHeaders in ((fromTable, fromBucketHeaders), (toTable, toBucketHeaders)))
 	allKeys = set(fromBuckets.keys()).union(toBuckets.keys())
 	
 	results = ResultSet(buckets)
 	for key in allKeys:
 		if key in fromBuckets:
-			fromBucket = fromBuckets[key]
+			fromBucket = fromBuckets[key].sorted(*fromSortHeaders)
 		else:
 			fromBucket = None
 		if key in toBuckets:
-			toBucket = toBuckets[key]
+			toBucket = toBuckets[key].sorted(*toSortHeaders)
 		else:
 			toBucket = None
 		if fromBucket and toBucket and len(fromBucket) == len(toBucket):
