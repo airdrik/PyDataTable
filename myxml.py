@@ -267,6 +267,9 @@ exluding this node's tags
 			del attributes['name']
 		if 'parent' in attributes:
 			raise XmlParseError("Can't set parent of xml node in XmlNode constructor.  Use parent.appendChild(newChildNode) instead")
+		if 'text' in attributes:
+			self.__innerText[0] = attributes['text']
+			del attributes['text']
 		self.__attributes.update(attributes)
 	def parse(self, xmlTags):
 		'''parse(self, xmlTags)
