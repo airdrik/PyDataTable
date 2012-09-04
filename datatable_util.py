@@ -100,3 +100,8 @@ swaps a column containing xml strings with myxml XmlNodes
 usage: dt = DataTable(...) & makeXml('xml column')
 '''
 	return convertColumns({header: myxml.XmlNode})
+
+class AddsNothing:
+	'''Used for datatable.join otherFieldPrefix parameter if the datatable headers aren't strings and you want to preserve the headers as-is'''
+	def __add__(self, other):
+		return other
