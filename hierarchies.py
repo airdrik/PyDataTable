@@ -231,15 +231,16 @@ def makeHierarchy(values, *headers):
 		h = h[values[header]]
 	return hierarchy
 
-def addToHierarchy(hierarchy, values, headers):
+def addToHierarchy(hierarchy, values, headers, leaf=None):
 	'''Adds the values from the values dictionary (key-value pairs) to the hierarchy (tree of dictionaries) using headers to determine the order'''
 	if not headers:
-		return
+		if hasattr(leaf, '__iter__') and not isinstance(leaf, basestring):
+			return AttributeDict((h, values[h]) for h in leaf)
+		return values[leaf]
 	header, rest = headers[0], headers[1:]
 	val = values[header]
-	if val not in hierarchy:
-		hierarchy[HierarchyKey(header, val)] = AttributeDict()
-	addToHierarchy(hierarchy[val], values, rest)
+	hierarchy[HierarchyKey(header, val)] = addToHierarchy(hierarchy.get(val, AttributeDict()), values, rest, leaf=leaf)
+	return hierarchy
 
 def mergeHierarchies(h1, h2):
 	'''
@@ -262,10 +263,13 @@ def makeHierarchyFromTable2(table, *headers):
 		hierarchy = mergeHierarchies(hierarchy, makeHierarchy(row, *headers))
 	return hierarchy
 
-def makeHierarchyFromTable(table, *headers):
+def makeHierarchyFromTable(table, *headers, **kwargs):
 	hierarchy = AttributeDict()
+	leaf = kwargs.get('leaf', None)
+	if leaf is None:
+		leaf = [h for h in table.headers() if h not in headers]
 	for row in table:
-		addToHierarchy(hierarchy, row, headers)
+		addToHierarchy(hierarchy, row, headers, leaf=leaf)
 	return hierarchy
 
 def cleanHierarchy(h, cleanLeaf):
