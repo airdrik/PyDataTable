@@ -26,7 +26,6 @@ def parseFixedWidthSpaceDelimited(f):
 Same as parseFixedWidth, but guesses at the headers by assuming that each field has a single space before it (except the first column)
 	'''
 	lines = f.read().splitlines()
-	maxlen = max(len(line) for line in lines)
 	minlen = min(len(line) for line in lines)
 	splits = [col for col in range(minlen) if all(row[col] == ' ' for row in lines)]
 	return parseFixedWidth(lines[1:], [(lines[0][start+1:end].strip(), start+2, end) for start, end in zip([-1]+splits, splits+[len(lines[0])])])
@@ -40,7 +39,7 @@ def fromXML(s):
 	'''
 	return DataTable(row.attributes() for row in XmlNode(s).row)
 
-def fromCursor(cur, scrub=None):
+def fromCursor(cur, scrub=None, customScrub=None):
 	'''Expects cur to be a pysql 2.0 - style cursor and returns a (list of) DataTable(s) with the results
 	optional parameter scrub is a method which is called for each header (row from cursor.description) to return a replace method 
 		which is then called on each value for that header
@@ -69,13 +68,26 @@ def fromCursor(cur, scrub=None):
 		return DataTable()
 	def result():
 		headers = [h[0] for h in cur.description]
-		theData = [AttributeDict(zip((h for h in headers), row)) for row in cur.fetchall()]
+		def zipHeaders(row):
+			d = {}
+			for i, h in enumerate(headers):
+				if h not in d or d[h] is None:
+					d[h] = row[i]
+				elif row[i] and row[i] != d[h]:
+					print 'WARNING: query returned multiple columns with the same name (%s) with conflicting data.  Taking the data from the first returned column' % h
+			return d
+		theData = [zipHeaders(row) for row in cur.fetchall()]
 		if scrub is not None:
 			for desc in cur.description:
 				replace = scrub(desc)
 				if replace is not None:
 					for row in theData:
 						row[desc[0]] = replace(row[desc[0]])
+		if customScrub:
+			for row in theData:
+				for header, fromDbValue in customScrub.items():
+					if row[header] is not None:
+						row[header] = fromDbValue(row[header])
 		return DataTable(theData)
 	results = [result()]
 	while cur.nextset():
