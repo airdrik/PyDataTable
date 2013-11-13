@@ -1,7 +1,7 @@
-import types
 from collections import defaultdict
 from datatable_util import AttributeDict, DataTableException, CSV_GivenHeaders, FIXEDWIDTH
-from hierarchies import makeHierarchyFromTable
+from hierarchies import Hierarchy
+import os
 
 class JoinType:
 	def __init__(self, leftOuter, rightOuter):
@@ -77,7 +77,7 @@ Value may be one of the following:
 	If value is a function then sets each item to the result of calling value on the item
 	returns the modified datatable
 '''
-		if isinstance(value, types.FunctionType):
+		if hasattr(value, '__call__'):
 			for row in self.__dataTable:
 				row[self.header] = value(row[self.header])
 		else:
@@ -143,7 +143,7 @@ Another DataTable instance, which will create a deep copy
 A string which may be parsed into one of the previous by calling parseMethod on the string.
 '''
 		if isinstance(data, DataTable):
-			self.__headers = AttributeDict((h, DataColumn(self, c)) for h, c in data.__headers.items())
+			self.__headers = {h: DataColumn(self, c) for h, c in data.__headers.items()}
 			self.__data = [AttributeDict((h.header, row[h.header]) for h in self.__headers.values()) for row in data]
 			return
 		if isinstance(data, str) or isinstance(data, unicode):
@@ -158,8 +158,8 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 			self.__headers = {}
 			return
 		if isinstance(data[0], dict):
-			headers = reduce(set.union, (row.keys() for row in data), set())
-			self.__headers = AttributeDict((h, DataColumn(self, h)) for h in sorted(headers))
+			headers = {k for row in data for k in row.keys()}
+			self.__headers = {h: DataColumn(self, h) for h in sorted(headers)}
 			for row in data:
 				for header in self.__headers.keys():
 					if header not in row:
@@ -167,7 +167,7 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 			self.__data = [AttributeDict(row) for row in data]
 		else:
 			headers = data.pop(0)
-			self.__headers = AttributeDict((h, DataColumn(self, h)) for h in headers)
+			self.__headers = {h: DataColumn(self, h) for h in headers}
 			self.__data = [AttributeDict(zip(headers, row)) for row in data]
 	def __iter__(self):
 		'''Gets an iterator over the data rows'''
@@ -203,8 +203,10 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 	def __len__(self):
 		'''The number of rows'''
 		return len(self.__data)
-	def toHierarchy(self, *headers):
-		return makeHierarchyFromTable(self, *headers)
+	def index(self, keyHeaders, leafHeaders=None):
+		if leafHeaders is None:
+			leafHeaders = set(self.headers()).difference(keyHeaders)
+		return Hierarchy.fromTable(self, keyHeaders, leafHeaders)
 	def __str__(self):
 		return self | FIXEDWIDTH
 	def __repr__(self):
@@ -224,8 +226,8 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 			other = DataTable([other])
 		if not len(self):
 			return other
-		selfNewHeaders = dict((h, None) for h in other.headers() if h not in self.headers())
-		otherNewHeaders = dict((h, None) for h in self.headers() if h not in other.headers())
+		selfNewHeaders = {h: None for h in other.headers() if h not in self.headers()}
+		otherNewHeaders = {h: None for h in self.headers() if h not in other.headers()}
 		return (self & selfNewHeaders) + (other & otherNewHeaders)
 	def append(self, other):
 		'''Join two DataTable instances (concatenate their rows)
@@ -266,10 +268,19 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 	def extend(self, other):
 		'''Add columns to the data tabel using the dictionary keys from other as the new headers and their values as fields on each row
 Overwrites existing columns'''
+		if hasattr(other, '__call__'):
+			if not self:
+				return self
+			newHeaders = other(self[0]).keys()
+			for newHeader in newHeaders:
+				self.__headers[newHeader] = DataColumn(self, newHeader)
+			for row in self.__data:
+				row += other(row)
+			return self
 		for header, value in other.items():
 			if header not in self.__headers:
 				self.__headers[header] = DataColumn(self, header)
-			if isinstance(value, types.FunctionType):
+			if hasattr(value, '__call__'):
 				for row in self.__data:
 					row[header] = value(row)
 			else:
@@ -352,6 +363,18 @@ Overwrites existing columns'''
 		self.__data.sort(cmp = mycmp)
 	sorted = _copyAndApplyOp(sort)
 	sorted.__doc__ = '''returns a new copy of the data table sorted'''
+	def iterBucket(self, *fields):
+		copy = self.sorted(*fields)
+		currentKey = None
+		currentBucket = []
+		for data in copy:
+			key = tuple(data[field] for field in fields)
+			if currentKey is not None and key != currentKey:
+				yield currentKey, DataTable(currentBucket)
+				currentBucket = []
+				currentKey = key
+			currentBucket.append(data)
+		yield currentKey, DataTable(currentBucket)
 	def sizeOfBuckets(self, *fields):
 		'''Returns a dict of bucket -> number of items in the bucket'''
 		buckets = defaultdict(lambda:0)
@@ -366,6 +389,12 @@ Overwrites existing columns'''
 			key = tuple(data[field] for field in fields)
 			buckets[key].append(data)
 		return AttributeDict((key, DataTable(bucket)) for key, bucket in buckets.iteritems())
+	def filterBucket(self, predicate, *fields):
+		'''Filter the datatable using an aggregate predicate
+fields specifies how the data will be grouped
+predicate is a method which takes a bucket of data and returns if the bucket should be included in the result
+'''
+		return DataTable.collect(bucket for key, bucket in self.iterBucket(*fields) if predicate(bucket))
 	def join(self, other, joinParams=None, otherFieldPrefix='', joinType=LEFT_OUTER_JOIN):
 		'''
 dataTable.join(otherTable, joinParams, otherFieldPrefix='')
@@ -377,14 +406,14 @@ Parameters:
 	joinType - the instance of JoinType which indicates if items should be included in one data table which aren't in the other
 		'''
 		if joinParams is None:
-			joinParams = dict((h,h) for h in self.headers() if h in other.headers())
+			joinParams = {h: h for h in self.headers() if h in other.headers()}
 		elif not isinstance(joinParams, dict):
 			raise Exception("joinParams must be a dictionary of <field in self> to <field in other>")
 
 		if not other:
 			if not self or joinType in (INNER_JOIN, RIGHT_OUTER_JOIN):
 				return DataTable()
-			return self & dict((otherFieldPrefix + v, None) for v in other.headers() if v not in joinParams.values())
+			return self & {otherFieldPrefix + v: None for v in other.headers() if v not in joinParams.values()}
 		if not self:
 			if joinType in (INNER_JOIN, LEFT_OUTER_JOIN):
 				return DataTable()
@@ -392,7 +421,7 @@ Parameters:
 			for header in other.headers():
 				if header not in joinParams.values():
 					other.renameColumn(header, otherFieldPrefix + header)
-			return other & dict((header, None) for header in self.headers() if header not in joinParams)
+			return other & {header: None for header in self.headers() if header not in joinParams}
 
 		newHeaders = other.headers()
 		for header in joinParams.values():
@@ -402,7 +431,7 @@ Parameters:
 		def tempJoin():
 			seenKeys = set()
 			for row in self:
-				newRow = AttributeDict(row)
+				newRow = dict(row)
 				key = tuple(row[field] for field in joinParams.keys())
 				seenKeys.add(key)
 				if key not in otherBuckets:
@@ -415,13 +444,13 @@ Parameters:
 				for otherRow in otherRows:
 					for header in newHeaders:
 						newRow[otherFieldPrefix+header] = otherRow[header]
-					yield AttributeDict(newRow)
+					yield dict(newRow)
 			if joinType.rightOuter:
-				joinParamReversed = dict((v,k) for k,v in joinParams.items())
+				joinParamReversed = {v: k for k,v in joinParams.items()}
 				for otherRow in other:
 					key = tuple(otherRow[field] for field in joinParams.values())
 					if key not in seenKeys:
-						newRow = AttributeDict((joinParamReversed[k] if k in joinParamReversed else otherFieldPrefix+k, v) for k, v in otherRow.iteritems())
+						newRow = {joinParamReversed[k] if k in joinParamReversed else otherFieldPrefix+k: v for k, v in otherRow.iteritems()}
 						for header in self.headers():
 							if header not in joinParams:
 								newRow[header] = None
@@ -431,7 +460,7 @@ Parameters:
 		'''Write the contents of this DataTable to a file with the given name in the standard csv format'''
 		if not headers:
 			headers = self.headers()
-		with open(fileName, 'w') as f:
+		with open(os.path.expanduser(fileName), 'w') as f:
 			f.write(self | CSV_GivenHeaders(*headers))
 	def duplicates(self, *fields):
 		'''given a list of fields as keys, return a DataTable instance with the rows for which those fields are not unique'''
@@ -491,25 +520,28 @@ Parameters:
 		'''
 		if not aggregations:
 			return (self / groupBy).distinct()
-		def tempIter():
-			for key, bucket in self.bucket(*groupBy).iteritems():
-				row = dict(zip(groupBy, key))
-				for field, aggMethod in aggregations.iteritems():
-					row[field] = aggMethod(bucket)
-				yield row
-		return DataTable(tempIter()).sorted(*groupBy)
+		DataTable(
+			AttributeDict(zip(groupBy, key)) + 
+			{field: aggMethod(bucket) for field, aggMethod in aggregations.iteritems()} 
+				for key, bucket in self.iterBucket(*groupBy)
+		).sorted(*groupBy)
 	def renameColumn(self, column, newName):
 		'''rename the column in place'''
 		for row in self:
-			row[newName] = row[column]
+			v = row[column]
 			del row[column]
-		self.__headers[newName] = DataColumn(self, newName)
+			row[newName] = v
 		del self.__headers[column]
+		self.__headers[newName] = DataColumn(self, newName)
 	def minRow(self, *fields):
 		'''return the row with the minimum value(s) in the given field(s)'''
+		if not self:
+			return None
 		return self.sorted(*fields)[0]
 	def maxRow(self, *fields):
 		'''return the row with the maximum value(s) in the given field(s)'''
+		if not self:
+			return None
 		return self.sorted(*fields)[-1]
 
 def diffToTable(diffResults, keyHeaders):
@@ -518,7 +550,7 @@ def diffToTable(diffResults, keyHeaders):
 		if isinstance(v, dict):
 			for i in range(len(v.values()[0])):
 				d = dict(zip(keyHeaders, k))
-				d.update(dict((h, r[i]) for h, r in v.iteritems()))
+				d.update({h: r[i] for h, r in v.iteritems()})
 				data.append(d)
 		else:
 			d = dict(zip(keyHeaders, k))
