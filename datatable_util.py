@@ -59,18 +59,18 @@ def XML(it):
 	'''
 	x = myxml.XmlNode(name='table')
 	for row in it:
-		x.appendChild(myxml.XmlNode(name='row', **dict((unicode(k), unicode(v)) for k, v in row.iteritems() if v is not None)))
+		x.appendChild(myxml.XmlNode(name='row', **{unicode(k): unicode(v) for k, v in row.iteritems() if v is not None}))
 	return x.prettyPrint()
 
 import json
 def JSON(it):
 	'''Takes an iterater of dicts and returns a json string'''
-	return json.dumps([dict((unicode(k), unicode(v)) for k, v in row.iteritems()) for row in it])
+	return json.dumps([{unicode(k): unicode(v) for k, v in row.iteritems()} for row in it])
 
 #The following are column filters.  Typical usage:
 # dt = DataTable(...)
 # withoutEmptyColumns = dt ^ emptyColumns
-noneColumns = lambda c: set(c) == set([None])
+noneColumns = lambda c: set(c) == {None}
 emptyColumns = lambda c: not any(c)
 hasValueColumns = lambda c: any(c)
 singleValueColumns = lambda c: len(set(c)) == 1
@@ -84,7 +84,7 @@ print dt & convertColumns({'accountId': int, 'value': float, 'startDate': parseD
 instead of:
 print dt & {'accountId': lambda row: int(row.accountId), 'value': lambda row: float(row.value), 'startDate': lambda row: parseDate(row.startDate)}
 	'''
-	return dict((lambda k, v: (k, lambda row: v(row[k])))(k, v) for k,v in columnReplacements.items())
+	return {k: (lambda k: lambda row: v(row[k]))(k) for k,v in columnReplacements.items()}
 
 def replaceNewLines(header, replacement='|'):
 	'''replaceNewLines(header)
@@ -101,7 +101,8 @@ usage: dt = DataTable(...) & makeXml('xml column')
 '''
 	return convertColumns({header: myxml.XmlNode})
 
-class AddsNothing:
+class AS_IS:
 	'''Used for datatable.join otherFieldPrefix parameter if the datatable headers aren't strings and you want to preserve the headers as-is'''
 	def __add__(self, other):
 		return other
+AS_IS = AS_IS()
