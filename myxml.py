@@ -212,6 +212,41 @@ def indent(xmlString, newLineStr='\n', indentation='\t'):
 indents each line in the string'''
 	return newLineStr.join(indentation + line for line in xmlString.split(newLineStr))
 
+def matchTags(xmlTags):
+	matchableTags = [(tag, i) for i, tag in enumerate(xmlTags) if tag.startswith('<') and not tag[1] in ('!', '?')]
+	unclosedTags = defaultdict(lambda : [])
+	matchedTags = {}
+	closingTags = defaultdict(lambda : [])
+	for tag, i in matchableTags:
+		name, attributes, tail = splitTag(tag)
+		if name.startswith('/'):
+			closingTags[name].append(i)
+		elif tail:
+			matchedTags[i] = i
+		else:
+			unclosedTags[name].append(i)
+	for name, openTagPositions in unclosedTags.iteritems():
+		closeTagPositions = closingTags['/' + name]
+		if len(openTagPositions) != len(closeTagPositions):
+			if closeTagPositions:
+				raise XmlParseError("Error parsing xml: unmatched tags with name: %s. Found %d opening tags and %d closing tags" % (name, len(openTagPositions), len(closeTagPositions)))
+			print "Error parsing xml: unmatched tags with name: %s. Found %d opening tags and %d closing tags" % (name, len(openTagPositions), len(closeTagPositions))
+			for position in openTagPositions:
+				matchedTags[position] = -1
+			continue
+		stack = [openTagPositions.pop(0)]
+		while stack:
+			if not openTagPositions or openTagPositions[0] > closeTagPositions[0]:
+				matchedTags[stack.pop(-1)] = closeTagPositions.pop(0)
+			else:
+				stack.append(openTagPositions.pop(0))
+	return [(tag,) if i not in matchedTags else (tag, matchedTags[i] if i != -1 else -1) for i, tag in enumerate(xmlTags)]
+
+def fixHtmlSelfClosingTags(xmlString):
+	xmlTags = splitAllTags(xmlString)
+	xmlTagsWithMatches = matchTags(xmlTags)
+	return XmlTagList(tag[0][:-1] + '/>' if len(tag) > 1 and tag[1] == -1 else tag[0] for tag in xmlTagsWithMatches)
+		
 class XmlNode(object):
 	'''XmlNode class
 	The xml node class.  Allows access to node attributes using the . notation (e.g. node.attribute), 
@@ -283,7 +318,7 @@ from the string until it encounters the appropriate closing tag.
 		if not xmlTags:
 			return
 		tag = xmlTags.pop(0)
-		while not tag.startswith('<') or tag.startswith('<!DOCTYPE') or tag.startswith('<?xml') or tag.startswith('<!--')  or xmlTags[0].startswith('<![CDATA['):
+		while not tag.startswith('<') or tag.startswith('<!DOCTYPE') or tag.startswith('<?xml') or tag.startswith('<!--')  or tag.startswith('<![CDATA['):
 			self.__pre += tag
 			tag = xmlTags.pop(0)
 		name, attributes, tail = splitTag(tag)
@@ -614,7 +649,7 @@ class XmlNodeList(object):
 	def named(self, nodeName):
 		return self.where(lambda node: node.name == nodeName)
 	def parent(self):
-		return XmlNodeList(set(node.parent for node in self))
+		return XmlNodeList({node.parent for node in self})
 	def __iter__(self):
 		return iter(self.__nodeList)
 	def __len__(self):
