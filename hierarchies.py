@@ -26,338 +26,284 @@ would be represented by the following hierarchy:
 }
 
 '''
-from myxml import XmlNode
+from myxml import XmlNode, XmlNodeList
 from datatable_util import AttributeDict
 
-def __flatten(l):
-	for i in l:
-		if isinstance(i, tuple) or isinstance(i, list):
-			for v in __flatten(i):
-				yield v
-		else:
-			yield i
+def _getFixedWidthFormat(widths):
+	return ('{!s:<%d} ' * len(widths)) % widths
 
-def flatten(*l):
-	return tuple(__flatten(l))
-
-class HierarchyKey(object):
+class HierarchyLeaf(list):
+	'''HierarchyLeaf represents the base of a hierarchy, and is a list of rows that have been added to the hierarchy that match a hierarchy key
 	'''
-	class used by herarchies for the dict keys
-	key is the header of the item (should match the key of the other HierarchyKey in the same level)
-	value is used for the actual key in the dict.
-example:
-d = {HierarchyKey('A','a'):{}, {HierarchyKey('A','b'):{}}
-d['a'] == {}
-d[HierarchyKey('A','a')] == {}
-
-	primary use for the key is that when iterating over the hierarchy, the it is used as the key in the resulting key-value pairs
-examples:
-d = {HierarchyKey('A','a'):{}, {HierarchyKey('A','b'):{}}
-[row for row in iterHierarchy(d)] == [{'A':'a'}, {'A','b'}]
-
-	Should preserve the following
-table = # some list of dicts where the dicts have common keys
-h =  makeHierarchyFromTable(table, *table[0].keys())
-table == [row for row in iterHierarchy(h)]
-	'''
-	def __init__(self, key, value):
-		self.key = key
-		self.value = value
-	def __repr__(self):
-		return '<%s:%s>' % (self.key, self.value)
-	def __str__(self):
-		return '%s:%s' % (self.key, self.value)
-	def __hash__(self):
-		return hash(self.value)
-	def __eq__(self, other):
-		return self.value == other
-	def __req__(self, other):
-		return self.value == other
-	def __cmp__(self, other):
-		return cmp(self.value, other)
-	def __rcmp__(self, other):
-		return cmp(self.value, other)
-	def __add__(self, other):
-		return HierarchyKey(flatten(self.key,other.key), flatten(self.value, other.value))
-	def asDict(self):
-		if isinstance(self.key, tuple):
-			return AttributeDict(zip(self.key, self.value))
-		return AttributeDict({self.key: self.value})
-
-class Hierarchy(AttributeDict):
-	@staticmethod
-	def fromRow(values, *headers):
-		h = hierarchy = Hierarchy()
-		for header in headers:
-			h[HierarchyKey(header, values[header])] = Hierarchy()
-			h = h[values[header]]
-		return hierarchy
-	@staticmethod
-	def fromTable(table, *headers):
-		hierarchy = Hierarchy()
-		for row in table:
-			hierarchy.addValues(row, headers)
-		return hierarchy
-	def addValues(self, values, headers):
-		'''Adds the values from the values dictionary (key-value pairs) to the hierarchy (tree of dictionaries) using headers to determine the order'''
-		if not headers:
-			return
-		header, rest = headers[0], headers[1:]
-		val = values[header]
-		if val not in self:
-			self[HierarchyKey(header, val)] = Hierarchy()
-		self[val].addValues(values, rest)
+	def copy(self):
+		return HierarchyLeaf(AttributeDict(row) for row in self)
+	def project(self, newLeafHeaders):
+		return HierarchyLeaf(AttributeDict((k, v) for k, v in row.iteritems() if k in newLeafHeaders) for row in self)
 	def merge(self, other):
-		'''
-		recursively merge two hierarchies
-		'''
-		ret = Hierarchy()
-		for k,v in self.iteritems():
-			if k in other:
-				ret[k] = v.merge(other[k])
-			else:
-				ret[k] = v
-		for k,v in other.iteritems():
-			if k not in self:
-				ret[k] = v
-		return ret
-	def cleanHierarchy(self, cleanLeaf):
-		'''
-	cleans up a hierarchy by removing branches that may be cleaned
-When cleanHierarchy is called on a leaf node (defined as a node where all of its children are empty dicts, e.g.: {'a':{}, 'b':{}}), it returns tailReturn(h)
-for all other nodes, for each of its children where cleanHierarchy returns nothing (None, empty dict, etc) then don't set that child in the return value
-so, to trim all of the branches of a hierarchy where the leaf node = {'a':{}} then do the following:
+		return HierarchyLeaf(row1+row2 for row1 in self for row2 in other)
+	def _collect_column_maximums(self):
+		return tuple(max(len(str(value)) for _, value in columnKeyValues) for columnKeyValues in zip(*(sorted(row.iteritems()) for row in self)))
+	def _str(self, widths):
+		formatStr = _getFixedWidthFormat(widths)
+		for row in self:
+			yield formatStr.format(*(str(value) for _, value in sorted(row.iteritems())))
+#	def _str(self, widths):
+#		for row in self:
+#			yield '\t'.join('%s:%s' % (k, v) for k,v in sorted(row.iteritems()))
+	def toXML(self):
+		def it():
+			for row in self:
+				yield XmlNode(name='leaf', **row)
+		return XmlNodeList(it())
+	def toXMLString(self):
+		def it():
+			for row in self:
+				yield '<leaf%s/>' % ''.join(' %s="%s"' % (k, v) for k,v in sorted(row.iteritems()))
+		return ''.join(it())
+	def __getitem__(self, criteria):
+		if isinstance(criteria, tuple):
+			if not criteria:
+				return self
+			elif len(criteria) == 1:
+				criteria = criteria[0]
+		if hasattr(criteria, '__call__'):
+			return HierarchyLeaf(row for row in self if criteria(row))
+		return super(HierarchyLeaf, self).__getitem__(criteria)
+	def rows(self):
+		return iter(self)
+	def aggregate(self, aggregations={}, parentKey=AttributeDict()):
+		if not aggregations:
+			return HierarchyLeaf()
+		return HierarchyLeaf(	[AttributeDict((field, aggMethod(parentKey, self)) for field, aggMethod in aggregations.iteritems())])
+	def renameHeaders(self, reassignments):
+		for row in self:
+			for fromHeader, toHeader in reassignments.iteritems():
+				if fromHeader in row:
+					row[toHeader] = row[fromHeader]
+					del row[fromHeader]
 
-def myCleanHierarchy(hierarchy):
-	def cleanLeaf(h):
-		if h == {'a':{}}:
-			return None
-		return h
-	return cleanHierarchy(hierarchy, cleanLeaf)
-
-Then calling the following:
-
-myCleanHierarchy({'b':{'a':{}}, 'c':{'a':{}, 'd':{}}})
-
-would return:
-
-{'c':{'a':{}, d':{}}}
-
-and calling:
-
-myCleanHierarchy({'b':{'a':{}}, 'c':{'a':{}, 'd':{'a':{}}}})
-
-would return:
-
-{}
+class Hierarchy():
+	'''Hierarchy class, providing methods for handling data in a hierarchical structure
 '''
-		if self == {}:
-			return self
-		ret = Hierarchy()
-		for k,v in self.iteritems():
-			clean = v.cleanHierarchy(cleanLeaf)
-			if clean is not None:
-				ret[k] = clean
-		if not ret:
-			return None
-		if not any(ret.values()):
-			return cleanLeaf(ret)
-		return ret
-
-	def __iter__(self):
-		for k,v in sorted(self.iteritems()):
-			h = k.asDict()
-			if not v:
-				yield AttributeDict(h)
+	@staticmethod
+	def fromRow(values, keyHeaders, leafHeaders):
+		'''Create a new Hierarchy with the data in the values dict'''
+		hierarchy = Hierarchy(keyHeaders, leafHeaders)
+		hierarchy.addValues(values)
+		return hierarchy
+	@staticmethod
+	def fromTable(table, keyHeaders, leafHeaders):
+		'''Create a new Hierarchy with the data in the table'''
+		hierarchy = Hierarchy(keyHeaders, leafHeaders)
+		for row in table:
+			hierarchy.addValues(row)
+		return hierarchy
+	def __init__(self, keyHeaders, leafHeaders):
+		'''Create a new Hierarchy with the given key and leaf headers
+The key headers defines the depth of the hierarchy, while the leaf headers defines the keys retained in the leaf nodes
+'''
+		self.keyHeaders = keyHeaders
+		self.leafHeaders = leafHeaders
+		self._data = {}
+	def copy(self):
+		'''make a new deep copy of this hierarchy'''
+		new = Hierarchy(self.keyHeaders, self.leafHeaders)
+		for k, v in self:
+			new[k] = v.copy()
+		return new
+	def reindex(self, newKeyHeaders, newLeafHeaders=None):
+		if newLeafHeaders is None:
+			newLeafHeaders = set(self.keyHeaders).union(self.leafHeaders).difference(newKeyHeaders)
+		new = Hierarchy(newKeyHeaders, newLeafHeaders)
+		for row in self.rows():
+			new.addValues(row)
+		return new
+	def addValues(self, values):
+		'''Adds the values from the values dict to this hierarchy'''
+		val = values[self.keyHeaders[0]]
+		if len(self.keyHeaders) == 1:
+			if val not in self._data:
+				self._data[val] = HierarchyLeaf()
+			self._data[val].append(AttributeDict((k, values[k]) for k in self.leafHeaders))
+			return
+		if val not in self._data:
+			self._data[val] = Hierarchy(self.keyHeaders[1:], self.leafHeaders)
+		self[val].addValues(values)
+	def keys(self):
+		return self._data.keys()
+	def __getitem__(self, key):
+		'''hierarchy[key]
+returns the hierarchy or leaf node from the given key
+key may be a list or tuple of keys which walk down the hierarchy for each key and retrieve the resulting hierarchy, leaf or scalar'''
+		if isinstance(key, tuple):
+			if not key:
+				return self
+			new = Hierarchy(self.keyHeaders, self.leafHeaders)
+			if key[0] in (True, all, any):
+				for k, v in self:
+					new._data[k] = v[key[1:]]
+			elif hasattr(key[0], '__call__'):
+				for k, v in self:
+					if key[0](k):
+						new._data[k] = v[key[1:]]
+			elif isinstance(key[0], tuple):
+				first, last = key[0]
+				for k, v in self:
+					if first <= k and k <= last:
+						new._data[k] = v[key[1:]]
+			elif isinstance(key[0], (list, set)):
+				for k, v in self:
+					if k in key[0]:
+						new._data[k] = v[key[1:]]
 			else:
-				for d in v:
-					yield d + h
-	def __str(self, currentDepth=0):
-		for k,v in sorted(self.iteritems()):
-			yield '\t'*currentDepth + str(k)
-			for line in v.__str(currentDepth+1):
-				yield line
+				new._data[key[0]] = self._data[key[0]][key[1:]]
+			return new
+		if hasattr(key, '__call__'):
+			new = Hierarchy(self.keyHeaders, self.leafHeaders)
+			for k, v in self:
+				if key(k):
+					new._data[k] = v
+			return new
+		if isinstance(key, (list, set)):
+			new = Hierarchy(self.keyHeaders, self.leafHeaders)
+			for k, v in self:
+				if k in key:
+					new._data[k] = v
+			return new
+		return self._data[key]
+	def __setitem__(self, key, value):
+		'''hierarchy[key] = value
+adds value to the hierarchy retrieved by hierarchy[key]'''
+		if isinstance(key, (list, tuple)):
+			if not key:
+				self.addValues(value)
+			else:
+				self[key[0]][key[1:]] = value
+		else:
+			self[key][()] = value
+	def __delitem__(self, key):
+		if isinstance(key, (list, tuple)):
+			if len(key) == 1:
+				key = key[0]
+			else:
+				if not key:
+					return
+				if hasattr(key[0], '__call__'):
+					for k, v in self:
+						if key[0](k):
+							del v[key[1:]]
+				else:
+					del self._data[key[0]][key[1:]]
+				return
+		if hasattr(key, '__call__'):
+			for k in self._data.keys():
+				if key(k):
+					del self._data[k]
+		else:
+			del self._data[k]
+	def __len__(self):
+		return sum(len(child) for child in self._data.itervalues())
+	def __contains__(self, key):
+		return key in self._data
+	def __iter__(self):
+		return self._data.iteritems()
+	def rows(self):
+		'''iter(hierarchy)
+iterate over the "rows" in the hierarchy, where a row is defined as a leaf node merged with all parents in the hierarchy'''
+		for key, child in sorted(self):
+			keyDict = {self.keyHeaders[0]: key}
+			for row in child.rows():
+				yield row + keyDict
+	def _collect_column_maximums(self):
+		return (max(len(str(k)) for k in self._data.keys()),) + tuple(max(columnMaximums) for columnMaximums in zip(*(child._collect_column_maximums() for _, child in self)))
+	def _str(self, widths):
+		fmt = _getFixedWidthFormat(widths[:1])
+		widths = widths[1:]
+		for k,v in sorted(self):
+			current = fmt.format(k)
+			for line in v._str(widths):
+				yield current + line
+				current = ' ' * len(current)
+#	def _str(self):
+#		n = max(len(str(k)) for k in self._data.keys())
+#		fmt = '{}:{:<%d} ' % n
+#		for k,v in sorted(self):
+#			current = fmt.format(self.keyHeaders[0], k)
+#			for line in v._str():
+#				yield current + line
+#				current = ' ' * len(current)
 	def __str__(self):
-		return '\n'.join(self.__str())
+		widths = self._collect_column_maximums()
+		headers = map(str, list(self.keyHeaders) + sorted(self.leafHeaders))
+		widths = tuple(max((width, len(header))) for width, header in zip(widths, headers))
+		return _getFixedWidthFormat(widths).format(*headers) + '\n' + '\n'.join(self._str(widths))
 	def __repr__(self):
-		return 'Hierarchy : ' + repr(sorted(self.keys()))
-	def _toXML(self):
+		return 'Hierarchy; headers : %s; keys : %r' % (self.keyHeaders + sorted(self.leafHeaders), sorted(self._data.keys()))
+	def sizeOfGroups(self):
+		return {k: len(v) for k, v in self._data.iteritems()}
+	def extend(self, moreColumns):
+		new = Hierarchy(self.keyHeaders, set(self.leafHeaders).union(moreColumns.keys()))
+		for row in self.rows():
+			for k, v in moreColumns.iteritems():
+				if hasattr(v, '__call__'):
+					v = v(row)
+				new.addValues(row + {k: v})
+		return new
+	def project(self, newLeafHeaders):
+		new = Hierarchy(self.keyHeaders, set(newLeafHeaders))
+		for k, v in self:
+			new[k] = v.project(newLeafHeaders)
+		return new
+	def merge(self, other):
+		'''recursively merge two hierarchies'''
+		if self.keyHeaders != other.keyHeaders:
+			raise Exception('Cannot merge hierarchies with different keys')
+		ret = Hierarchy(self.keyHeaders, set(self.leafHeaders).union(other.leafHeaders))
+		for k,v in self:
+			if k in other:
+				ret._data[k] = v.merge(other[k])
+			else:
+				ret._data[k] = v.copy()
+		for k,v in other:
+			if k not in self:
+				ret._data[k] = v.copy()
+		return ret
+	def aggregate(self, aggregations={}, parentKey=AttributeDict()):
+		'''return an aggregation of the data grouped by a given set of fields.
+Parameters:
+	aggregations - a dict of field name -> aggregate method, where the method takes an intermediate DataTable
+		and returns the value for that field for that row. 
+		'''
+		if not aggregations:
+			return self.reindex(self.keyHeaders, ())
+		new = Hierarchy(self.keyHeaders, aggregations.keys())
+		for key, child in self:
+			new._data[key] = child.aggregate(aggregations, parentKey=parentKey+{self.keyHeaders[0]: key})
+		return new
+	def renameHeaders(self, reassignments):
+		self.keyHeaders = [(header if header not in reassignments else reassignments[header]) for header in self.keyHeaders]
+		self.leafHeaders= {(header if header not in reassignments else reassignments[header]) for header in self.leafHeaders}
+		for _, child in self:
+			child.renameHeaders(reassignments)
+	def toXML(self):
+		def it():
+			for key, value in self:
+				node = XmlNode(name=self.keyHeaders[0], key=key)
+				for childNode in value.toXml():
+					node.appendChild(childNode)
+				yield node
+		return XmlNodeList(it())
+	def toXMLString(self):
 		s = ''
-		for k,v in self.iteritems():
-			s += '<%s value="%s"' % (k.key, k.value)
-			if v:
-				s += '>' + v._toXML() + '</%s' % k.key
+		header = self.key
+		for key,value in self:
+			s += '<%s key="%s"' % (header, key)
+			if value:
+				s += '>' + value.toXMLString() + '</%s' % header
 			else:
 				s += '/'
 			s +='>'
 		return s
-	def toXML(self):
-		s = self._toXML()
-		if s:
-			return '<Hierarchy>' + s + '</Hierarchy>'
-		return '<Hierarchy/>'
-	@staticmethod
-	def fromXML(theXML):
-		if not isinstance(theXML, XmlNode):
-			theXML = XmlNode(theXML)
-		hierarchy = Hierarchy()
-		# @type theXML XmlNode
-		for node in theXML.children():
-			hierarchy[HierarchyKey(node.name, node['value'])] = Hierarchy.fromXML(node)
-		return hierarchy
-	def combineKeys(self):
-		'''
-		reduces the depth of the hierarchy by merging the nodes with one child with that child
-		e.g.
-		combineKeys({'a':{'b':{...b}}, 'c':{'d':{...d},'e':{...e}}}) -> {('a','b'):{...b}, 'c':{'d':{...d},'e':{...e}}}
-		combineKeys({'a':{'b':{'c':{'d':{'e':{}}}}}}) -> {('a','b','c','d','e'):{}}
-		'''
-		copy = Hierarchy()
-		for k,v in self.items():
-			if len(v) != 1:
-				copy[k] = v.combineKeys()
-			else:
-				t = k
-				while len(v) == 1:
-					t = t + v.keys()[0]
-					v = v.values()[0]
-				copy[t] = v.combineKeys()
-		return copy
-
-def makeHierarchy(values, *headers):
-	h = hierarchy = AttributeDict()
-	for header in headers:
-		h[HierarchyKey(header, values[header])] = AttributeDict()
-		h = h[values[header]]
-	return hierarchy
-
-def addToHierarchy(hierarchy, values, headers, leaf=None):
-	'''Adds the values from the values dictionary (key-value pairs) to the hierarchy (tree of dictionaries) using headers to determine the order'''
-	if not headers:
-		if hasattr(leaf, '__iter__') and not isinstance(leaf, basestring):
-			return AttributeDict((h, values[h]) for h in leaf)
-		return values[leaf]
-	header, rest = headers[0], headers[1:]
-	val = values[header]
-	hierarchy[HierarchyKey(header, val)] = addToHierarchy(hierarchy.get(val, AttributeDict()), values, rest, leaf=leaf)
-	return hierarchy
-
-def mergeHierarchies(h1, h2):
-	'''
-	recursively merge two hierarchies
-	'''
-	ret = AttributeDict()
-	for k,v in h1.iteritems():
-		if k in h2:
-			ret[k] = mergeHierarchies(v, h2[k])
-		else:
-			ret[k] = v
-	for k,v in h2.iteritems():
-		if k not in h1:
-			ret[k] = v
-	return ret
-
-def makeHierarchyFromTable2(table, *headers):
-	hierarchy = AttributeDict()
-	for row in table:
-		hierarchy = mergeHierarchies(hierarchy, makeHierarchy(row, *headers))
-	return hierarchy
-
-def makeHierarchyFromTable(table, *headers, **kwargs):
-	hierarchy = AttributeDict()
-	leaf = kwargs.get('leaf', None)
-	if leaf is None:
-		leaf = [h for h in table.headers() if h not in headers]
-	for row in table:
-		addToHierarchy(hierarchy, row, headers, leaf=leaf)
-	return hierarchy
-
-def cleanHierarchy(h, cleanLeaf):
-	'''
-	cleans up a hierarchy by removing branches that may be cleaned
-When cleanHierarchy is called on a leaf node (defined as a node where all of its children are empty dicts, e.g.: {'a':{}, 'b':{}}), it returns tailReturn(h)
-for all other nodes, for each of its children where cleanHierarchy returns nothing (None, empty dict, etc) then don't set that child in the return value
-so, to trim all of the branches of a hierarchy where the leaf node = {'a':{}} then do the following:
-
-def myCleanHierarchy(hierarchy):
-	def cleanLeaf(h):
-		if h == {'a':{}}:
-			return None
-		return h
-	return cleanHierarchy(hierarchy, cleanLeaf)
-
-Then calling the following:
-
-myCleanHierarchy({'b':{'a':{}}, 'c':{'a':{}, 'd':{}}})
-
-would return:
-
-{'c':{'a':{}, d':{}}}
-
-and calling:
-
-myCleanHierarchy({'b':{'a':{}}, 'c':{'a':{}, 'd':{'a':{}}}})
-
-would return:
-
-{}
-	'''
-	if h == {}:
-		return h
-	ret = AttributeDict()
-	for k,v in h.iteritems():
-		clean = cleanHierarchy(v, cleanLeaf)
-		if clean is not None:
-			ret[k] = clean
-	if not ret:
-		return None
-	if not any(v for v in ret.values()):
-		return cleanLeaf(ret)
-	return ret
-
-def iterHierarchy(hierarchy):
-	for k,v in sorted(hierarchy.iteritems()):
-		h = k.asDict()
-		if not v:
-			yield AttributeDict(h)
-		else:
-			for d in iterHierarchy(v):
-				yield d + h
-
-def printHierarchy(hierarchy, currentDepth=0):
-	for k,v in sorted(hierarchy.iteritems()):
-		print '\t'*currentDepth + str(k)
-		printHierarchy(v, currentDepth+1)
-
-def toXML(hierarchy):
-	s = ''
-	for k,v in hierarchy.iteritems():
-		s += '<%s value="%s"' % (k.key, k.value)
-		if v:
-			s += '>' + toXML(v) + '</%s' % k.key
-		else:
-			s += '/'
-		s +='>'
-	return s
-
-def combineKeys(hierarchy):
-	'''
-	reduces the depth of the hierarchy by merging the nodes with one child with that child
-	e.g.
-	combineKeys({'a':{'b':{...b}}, 'c':{'d':{...d},'e':{...e}}}) -> {('a','b'):{...b}, 'c':{'d':{...d},'e':{...e}}}
-	combineKeys({'a':{'b':{'c':{'d':{'e':{}}}}}}) -> {('a','b','c','d','e'):{}}
-	'''
-	copy = AttributeDict()
-	for k,v in hierarchy.items():
-		if len(v) != 1:
-			copy[k] = combineKeys(v)
-		else:
-			t = k
-			while len(v) == 1:
-				t = t + v.keys()[0]
-				v = v.values()[0]
-			copy[t] = combineKeys(v)
-	return copy
 
 def diff(fromTable, toTable, buckets=None):
 	'''
