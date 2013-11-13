@@ -1,5 +1,6 @@
 from datatable_util import AttributeDict
 from datatable import DataTable
+from hierarchies import Hierarchy
 from myxml import XmlNode
 from urllib import urlopen
 import csv
@@ -39,11 +40,12 @@ def fromXML(s):
 	'''
 	return DataTable(row.attributes() for row in XmlNode(s).row)
 
-def fromCursor(cur, scrub=None, customScrub=None):
+def fromCursor(cur, scrub=None, customScrub=None, indexedResults=False, index=None):
 	'''Expects cur to be a pysql 2.0 - style cursor and returns a (list of) DataTable(s) with the results
 	optional parameter scrub is a method which is called for each header (row from cursor.description) to return a replace method 
 		which is then called on each value for that header
 		return None to do nothing on that header
+	optional parameters indexedResults and index are used to determine if the results should be collected in an indexed Hierarchy and what index to use in that Hierarchy
 	
 	example - using adodbapi to connect to MS SQL server, the following will normalize smalldatetime fields to date objects and datetime fields to datetime objects:
 	
@@ -87,7 +89,12 @@ def fromCursor(cur, scrub=None, customScrub=None):
 			for row in theData:
 				for header, fromDbValue in customScrub.items():
 					if row[header] is not None:
-						row[header] = fromDbValue(row[header])
+						try:
+							row[header] = fromDbValue(row[header])
+						except:
+							pass
+		if indexedResults:
+			return Hierarchy.fromTable(theData, index, set(headers).difference(index))
 		return DataTable(theData)
 	results = [result()]
 	while cur.nextset():
