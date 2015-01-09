@@ -1,3 +1,5 @@
+import os
+
 class AttributeDict(dict):
 	'''
 	Subclass of dict that allows access to items using dot-notation:
@@ -7,7 +9,10 @@ print d.a # 1
 	'''
 	def __init__(self, *args, **vargs):
 		super(AttributeDict, self).__init__(*args, **vargs)
-		self.__dict__ = self
+	__getattr__ = dict.__getitem__
+	__setattr__ = dict.__setitem__
+	def __dir__(self):
+		return list(self.__dict__.keys()) + [str(key) for key in self.keys()]
 	def __iadd__(self, other):
 		self.update(other)
 		return self
@@ -52,20 +57,28 @@ def FIXEDWIDTH(it):
 		formatStr = '<no data>'
 	return '\n'.join((formatStr % row) for row in l)
 
-import myxml
+from bs4 import BeautifulSoup
 def XML(it):
 	'''Takes an iterator which yields dicts and returns an xml formatted string
 	The root node is named 'table', the rows are represented by 'row' nodes, whose attributes are the key-value pairs from the dict
 	'''
-	x = myxml.XmlNode(name='table')
+	x = BeautifulSoup('<table/>', 'xml')
 	for row in it:
-		x.appendChild(myxml.XmlNode(name='row', **{unicode(k): unicode(v) for k, v in row.iteritems() if v is not None}))
-	return x.prettyPrint()
+		x.table.append(x.new_tag('row', **{str(k): str(v) for k, v in row.items() if v is not None}))
+	return x.prettify()
 
 import json
 def JSON(it):
 	'''Takes an iterater of dicts and returns a json string'''
-	return json.dumps([{unicode(k): unicode(v) for k, v in row.iteritems()} for row in it])
+	return json.dumps([{str(k): str(v) for k, v in row.items()} for row in it])
+
+def writeTableAsCsv(table, fileName, *headers):
+	'''Write the contents of this DataTable to a file with the given name in the standard csv format'''
+	if not headers:
+		headers = table.headers()
+	with open(os.path.expanduser(fileName), 'w') as f:
+		f.write(table | CSV_GivenHeaders(*headers))
+
 
 #The following are column filters.  Typical usage:
 # dt = DataTable(...)
@@ -96,10 +109,10 @@ print dt & replaceNewLines('field name')
 
 def makeXml(header):
 	'''makeXml(header)
-swaps a column containing xml strings with myxml XmlNodes
+swaps a column containing xml strings with BeautifulSoup nodes
 usage: dt = DataTable(...) & makeXml('xml column')
 '''
-	return convertColumns({header: myxml.XmlNode})
+	return convertColumns({header: BeautifulSoup})
 
 class AS_IS:
 	'''Used for datatable.join otherFieldPrefix parameter if the datatable headers aren't strings and you want to preserve the headers as-is'''

@@ -26,8 +26,9 @@ would be represented by the following hierarchy:
 }
 
 '''
-from myxml import XmlNode, XmlNodeList
+from bs4 import BeautifulSoup
 from datatable_util import AttributeDict
+import inspect
 
 def _getFixedWidthFormat(widths):
 	return ('{!s:<%d} ' * len(widths)) % widths
@@ -38,28 +39,24 @@ class HierarchyLeaf(list):
 	def copy(self):
 		return HierarchyLeaf(AttributeDict(row) for row in self)
 	def project(self, newLeafHeaders):
-		return HierarchyLeaf(AttributeDict((k, v) for k, v in row.iteritems() if k in newLeafHeaders) for row in self)
+		return HierarchyLeaf(AttributeDict((k, v) for k, v in row.items() if k in newLeafHeaders) for row in self)
 	def merge(self, other):
 		return HierarchyLeaf(row1+row2 for row1 in self for row2 in other)
+	def mergeInPlace(self, other):
+		super(HierarchyLeaf, self).__init__([row1+row2 for row1 in self for row2 in other])
 	def _collect_column_maximums(self):
-		return tuple(max(len(str(value)) for _, value in columnKeyValues) for columnKeyValues in zip(*(sorted(row.iteritems()) for row in self)))
+		return tuple(max(len(str(value)) for _, value in columnKeyValues) for columnKeyValues in zip(*(sorted(row.items()) for row in self)))
 	def _str(self, widths):
 		formatStr = _getFixedWidthFormat(widths)
 		for row in self:
-			yield formatStr.format(*(str(value) for _, value in sorted(row.iteritems())))
-#	def _str(self, widths):
-#		for row in self:
-#			yield '\t'.join('%s:%s' % (k, v) for k,v in sorted(row.iteritems()))
+			yield formatStr.format(*(str(value) for _, value in sorted(row.items())))
 	def toXML(self):
-		def it():
-			for row in self:
-				yield XmlNode(name='leaf', **row)
-		return XmlNodeList(it())
+		soup = BeautifulSoup('<hierarchyleaf/>', 'xml')
+		for row in self:
+			soup.hierarchyleaf.append(soup.new_tag('leaf', **row))
+		return soup
 	def toXMLString(self):
-		def it():
-			for row in self:
-				yield '<leaf%s/>' % ''.join(' %s="%s"' % (k, v) for k,v in sorted(row.iteritems()))
-		return ''.join(it())
+		return ''.join((str(c) for c in self.toXML().children))
 	def __getitem__(self, criteria):
 		if isinstance(criteria, tuple):
 			if not criteria:
@@ -74,26 +71,37 @@ class HierarchyLeaf(list):
 	def aggregate(self, aggregations={}, parentKey=AttributeDict()):
 		if not aggregations:
 			return HierarchyLeaf()
-		return HierarchyLeaf(	[AttributeDict((field, aggMethod(parentKey, self)) for field, aggMethod in aggregations.iteritems())])
+		return HierarchyLeaf(	[AttributeDict((field, aggMethod(parentKey, self)) for field, aggMethod in aggregations.items())])
 	def renameHeaders(self, reassignments):
 		for row in self:
-			for fromHeader, toHeader in reassignments.iteritems():
+			for fromHeader, toHeader in reassignments.items():
 				if fromHeader in row:
 					row[toHeader] = row[fromHeader]
 					del row[fromHeader]
+
+def _maybeSet(d, k, v):
+	if v:
+		d[k] = v
 
 class Hierarchy():
 	'''Hierarchy class, providing methods for handling data in a hierarchical structure
 '''
 	@staticmethod
-	def fromRow(values, keyHeaders, leafHeaders):
+	def fromRow(values, keyHeaders, leafHeaders=None):
 		'''Create a new Hierarchy with the data in the values dict'''
+		if leafHeaders is None:
+			leafHeaders = set(values.keys()).difference(keyHeaders)
 		hierarchy = Hierarchy(keyHeaders, leafHeaders)
 		hierarchy.addValues(values)
 		return hierarchy
 	@staticmethod
-	def fromTable(table, keyHeaders, leafHeaders):
+	def fromTable(table, keyHeaders, leafHeaders=None):
 		'''Create a new Hierarchy with the data in the table'''
+		if leafHeaders is None:
+			table = list(table)
+			if not table:
+				return Hierarchy(keyHeaders, [])
+			leafHeaders = set(table[0].keys()).difference(keyHeaders)
 		hierarchy = Hierarchy(keyHeaders, leafHeaders)
 		for row in table:
 			hierarchy.addValues(row)
@@ -102,8 +110,8 @@ class Hierarchy():
 		'''Create a new Hierarchy with the given key and leaf headers
 The key headers defines the depth of the hierarchy, while the leaf headers defines the keys retained in the leaf nodes
 '''
-		self.keyHeaders = keyHeaders
-		self.leafHeaders = leafHeaders
+		self.keyHeaders = tuple(keyHeaders)
+		self.leafHeaders = tuple(leafHeaders)
 		self._data = {}
 	def copy(self):
 		'''make a new deep copy of this hierarchy'''
@@ -130,7 +138,25 @@ The key headers defines the depth of the hierarchy, while the leaf headers defin
 			self._data[val] = Hierarchy(self.keyHeaders[1:], self.leafHeaders)
 		self[val].addValues(values)
 	def keys(self):
-		return self._data.keys()
+		return tuple(self._data.keys())
+	def _filterByFunction(self, f, rest):
+		new = Hierarchy(self.keyHeaders, self.leafHeaders)
+		if not inspect.ismethod(f) and not inspect.isfunction(f):
+			f = f.__call__
+		args, vargs, kwargs, defaults = inspect.getargspec(f)
+		if len(args) == 1:
+			if args[0] in ('v', 'value', 'h', 'hierarchy'):
+				fltr = lambda _, v: f(v)
+			else:
+				fltr = lambda k, _: f(k)
+		elif len(args) == 2:
+			fltr = f
+		else:
+			raise ValueError("invalid filter method.  Expected function with one or two parameters.  Given function %r had %d parameters" % (f, len(args)))
+		for k, v in self:
+			if fltr(k, v):
+				_maybeSet(new._data, k, rest(v))
+		return new
 	def __getitem__(self, key):
 		'''hierarchy[key]
 returns the hierarchy or leaf node from the given key
@@ -141,29 +167,23 @@ key may be a list or tuple of keys which walk down the hierarchy for each key an
 			new = Hierarchy(self.keyHeaders, self.leafHeaders)
 			if key[0] in (True, all, any):
 				for k, v in self:
-					new._data[k] = v[key[1:]]
+					_maybeSet(new._data, k, v[key[1:]])
 			elif hasattr(key[0], '__call__'):
-				for k, v in self:
-					if key[0](k):
-						new._data[k] = v[key[1:]]
+				return self._filterByFunction(key[0], lambda v: v[key[1:]])
 			elif isinstance(key[0], tuple):
 				first, last = key[0]
 				for k, v in self:
 					if first <= k and k <= last:
-						new._data[k] = v[key[1:]]
+						_maybeSet(new._data, k, v[key[1:]])
 			elif isinstance(key[0], (list, set)):
 				for k, v in self:
 					if k in key[0]:
-						new._data[k] = v[key[1:]]
+						_maybeSet(new._data, k, v[key[1:]])
 			else:
-				new._data[key[0]] = self._data[key[0]][key[1:]]
+				_maybeSet(new._data, key[0], self._data[key[0]][key[1:]])
 			return new
 		if hasattr(key, '__call__'):
-			new = Hierarchy(self.keyHeaders, self.leafHeaders)
-			for k, v in self:
-				if key(k):
-					new._data[k] = v
-			return new
+			return self._filterByFunction(key, lambda v: v)
 		if isinstance(key, (list, set)):
 			new = Hierarchy(self.keyHeaders, self.leafHeaders)
 			for k, v in self:
@@ -202,11 +222,11 @@ adds value to the hierarchy retrieved by hierarchy[key]'''
 		else:
 			del self._data[k]
 	def __len__(self):
-		return sum(len(child) for child in self._data.itervalues())
+		return sum(len(child) for child in self._data.values())
 	def __contains__(self, key):
 		return key in self._data
 	def __iter__(self):
-		return self._data.iteritems()
+		return iter(self._data.items())
 	def rows(self):
 		'''iter(hierarchy)
 iterate over the "rows" in the hierarchy, where a row is defined as a leaf node merged with all parents in the hierarchy'''
@@ -215,6 +235,8 @@ iterate over the "rows" in the hierarchy, where a row is defined as a leaf node 
 			for row in child.rows():
 				yield row + keyDict
 	def _collect_column_maximums(self):
+		if not self:
+			return (0,) * (len(self.leafHeaders) + len(self.keyHeaders))
 		return (max(len(str(k)) for k in self._data.keys()),) + tuple(max(columnMaximums) for columnMaximums in zip(*(child._collect_column_maximums() for _, child in self)))
 	def _str(self, widths):
 		fmt = _getFixedWidthFormat(widths[:1])
@@ -224,27 +246,19 @@ iterate over the "rows" in the hierarchy, where a row is defined as a leaf node 
 			for line in v._str(widths):
 				yield current + line
 				current = ' ' * len(current)
-#	def _str(self):
-#		n = max(len(str(k)) for k in self._data.keys())
-#		fmt = '{}:{:<%d} ' % n
-#		for k,v in sorted(self):
-#			current = fmt.format(self.keyHeaders[0], k)
-#			for line in v._str():
-#				yield current + line
-#				current = ' ' * len(current)
 	def __str__(self):
 		widths = self._collect_column_maximums()
-		headers = map(str, list(self.keyHeaders) + sorted(self.leafHeaders))
+		headers = [str(h) for hdrs in (self.keyHeaders, sorted(self.leafHeaders)) for h in hdrs]
 		widths = tuple(max((width, len(header))) for width, header in zip(widths, headers))
 		return _getFixedWidthFormat(widths).format(*headers) + '\n' + '\n'.join(self._str(widths))
 	def __repr__(self):
-		return 'Hierarchy; headers : %s; keys : %r' % (self.keyHeaders + sorted(self.leafHeaders), sorted(self._data.keys()))
+		return 'Hierarchy; headers : %s; keys : %r' % (list(self.keyHeaders) + sorted(self.leafHeaders), sorted(self._data.keys()))
 	def sizeOfGroups(self):
-		return {k: len(v) for k, v in self._data.iteritems()}
+		return {k: len(v) for k, v in self._data.items()}
 	def extend(self, moreColumns):
 		new = Hierarchy(self.keyHeaders, set(self.leafHeaders).union(moreColumns.keys()))
 		for row in self.rows():
-			for k, v in moreColumns.iteritems():
+			for k, v in moreColumns.items():
 				if hasattr(v, '__call__'):
 					v = v(row)
 				new.addValues(row + {k: v})
@@ -259,20 +273,33 @@ iterate over the "rows" in the hierarchy, where a row is defined as a leaf node 
 		if self.keyHeaders != other.keyHeaders:
 			raise Exception('Cannot merge hierarchies with different keys')
 		ret = Hierarchy(self.keyHeaders, set(self.leafHeaders).union(other.leafHeaders))
-		for k,v in self:
+		for k, v in self:
 			if k in other:
 				ret._data[k] = v.merge(other[k])
 			else:
 				ret._data[k] = v.copy()
-		for k,v in other:
+		for k, v in other:
 			if k not in self:
 				ret._data[k] = v.copy()
 		return ret
+	def mergeInPlace(self, other):
+		if self.keyHeaders != other.keyHeaders:
+			raise Exception('Cannot merge hierarchies with different keys')
+		self.leafHeaders = set(self.leafHeaders).union(other.leafHeaders)
+		for k, v in self:
+			if k in other:
+				v.mergeInPlace(other[k])
+		for k, v in other:
+			if k not in self:
+				self._data[k] = v.copy()
+
 	def aggregate(self, aggregations={}, parentKey=AttributeDict()):
-		'''return an aggregation of the data grouped by a given set of fields.
+		'''return an aggregation of the hiararchy leaf tables
+	the resulting Hierarchy will have the same structure, except that the leaf tables will be collapsed to single rows
+	containing the results of applying the aggregations to the original leaf tables
 Parameters:
-	aggregations - a dict of field name -> aggregate method, where the method takes an intermediate DataTable
-		and returns the value for that field for that row. 
+	aggregations - a dict of field name -> aggregate method, where the method takes an intermediate HierarchyLeaf
+		and returns the value for that field for that row.
 		'''
 		if not aggregations:
 			return self.reindex(self.keyHeaders, ())
@@ -282,46 +309,36 @@ Parameters:
 		return new
 	def renameHeaders(self, reassignments):
 		self.keyHeaders = [(header if header not in reassignments else reassignments[header]) for header in self.keyHeaders]
-		self.leafHeaders= {(header if header not in reassignments else reassignments[header]) for header in self.leafHeaders}
+		self.leafHeaders = {(header if header not in reassignments else reassignments[header]) for header in self.leafHeaders}
 		for _, child in self:
 			child.renameHeaders(reassignments)
 	def toXML(self):
-		def it():
-			for key, value in self:
-				node = XmlNode(name=self.keyHeaders[0], key=key)
-				for childNode in value.toXml():
-					node.appendChild(childNode)
-				yield node
-		return XmlNodeList(it())
+		soup = BeautifulSoup('<hierarchy/>', 'xml')
+		for key, value in self:
+			node = soup.new_tag(self.keyHeaders[0], key=key)
+			for childNode in value.toXml().children:
+				node.append(childNode)
+			soup.hierarchy.append(node)
+		return soup
 	def toXMLString(self):
-		s = ''
-		header = self.key
-		for key,value in self:
-			s += '<%s key="%s"' % (header, key)
-			if value:
-				s += '>' + value.toXMLString() + '</%s' % header
-			else:
-				s += '/'
-			s +='>'
-		return s
+		return str(self.toXML())
 
-def diff(fromTable, toTable, buckets=None):
+def diffTables(fromTable, toTable, buckets=None):
 	'''
-	p is the production (from) profile (or the latest execution from such a profile - may be the profileID)
-	t is the test (to) profile (or latest execution from such a profile).  If t is None, expects p to be a profileID and will populate p and t from production and test accordingly
-	buckets is the fields to bucket the results (should be the set of fields which uniquely identifies an entity).  May be left out if p is a profile or profileID
-	ignored is a list of fields to filter out of the results completely (defaults to ID and NormalizationExecutionID)
-	reconDate is an optional date if p (and t) are profiles (or profileIDs)
+	compares the data in two tables, returning a hierarchichal view of the resulting data
+
+	buckets is the fields to bucket the results (should be the set of fields which uniquely identifies an entity)
 	'''
-	if fromTable is None:
-		return 'No Production data'
-	if toTable is None:
-		return 'No test data'
 	res = (fromTable & {'_results':'From'}).augment(toTable & {'_results':'To'})
-	diffHeaders = (tuple(b for b in buckets if b in res.headers())+ tuple(h for h in res.headers() if h not in buckets + ('_results',)) + ('_results',))
-	h = Hierarchy.fromTable(res, *diffHeaders)
-	def cleanLeaf(h):
-		if h == {'From':{},'To':{}}:
-			return None
-		return h
-	return h.cleanHierarchy(cleanLeaf) or {}
+	diffHeaders = tuple(b for b in buckets if b in res.headers()) + ('_results',)
+	h = Hierarchy.fromTable(res, diffHeaders)
+	def scrubResults(h):
+		new = Hierarchy(h.keyHeaders, h.leafHeaders)
+		if h.keyHeaders == ('_results',):
+			if 'From' in h and 'To' in h and h['From'] == h['To']:
+				return None
+			return h
+		for k, v in h:
+			_maybeSet(new._data, k, scrubResults(h[k]))
+		return new
+	return scrubResults(h)

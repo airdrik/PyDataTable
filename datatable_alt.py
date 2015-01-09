@@ -18,7 +18,7 @@ class DataColumn(object):
 		self.__dataTable = dataTable
 		if isinstance(header, DataColumn):
 			self.header = header.header
-			self.__data = list(header.__data) 
+			self.__data = list(header.__data)
 		else:
 			self.header = header
 			self.__data = []
@@ -45,7 +45,7 @@ class DataColumn(object):
 		return value in self.__data
 	def __cmp__(self, other):
 		if not isinstance(other, DataColumn) or self.__dataTable is not other.__dataTable:
-			raise NotImplemented
+			raise NotImplemented()
 		return cmp(self.header, other.header)
 	def __filter(self, value):
 		if value is None:
@@ -66,7 +66,7 @@ class DataColumn(object):
 			for i in range(len(self)):
 				if value(self[i]):
 					yield i
-		elif '__contains__' in dir(value) and not isinstance(value, str) and not isinstance(value, unicode):
+		elif '__contains__' in dir(value) and not isinstance(value, str):
 			for i in range(len(self)):
 				if self[i] in value:
 					yield i
@@ -157,7 +157,7 @@ for t in tables:
 				if h not in table.headers():
 					data[h] += [None] * len(table)
 			size += len(table)
-		return DataTable(DataColumn(None, header, columnData) for header, columnData in data.iteritems())
+		return DataTable(DataColumn(None, header, columnData) for header, columnData in data.items())
 	def __init__(self, data=None, parseMethod=None):
 		'''Create a data table from the given data
 	data may be one of the following:
@@ -170,7 +170,7 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 			self.__headers = {h: DataColumn(self, c) for h, c in data.__headers.items()}
 			self.__length = len(data)
 			return
-		if isinstance(data, str) or isinstance(data, unicode):
+		if isinstance(data, str):
 			data = parseMethod(data)
 		if not data:
 			self.__headers = {}
@@ -201,7 +201,7 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 			indices = range(start, stop, step)
 		else:
 			indices = list(indices)
-		return DataTable(DataColumn(None, c.header, (c[i] for i in indices)) for c in self.__headers.itervalues())
+		return DataTable(DataColumn(None, c.header, (c[i] for i in indices)) for c in self.__headers.values())
 	def __iter__(self):
 		'''Gets an iterator over the data rows'''
 		for i in range(len(self)):
@@ -226,10 +226,10 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 		return sorted(self.__headers.keys())
 	def filter(self, filterFunction):
 		'''Returns a DataTable containing the lines in self filtered by the given filterFunciton
-	Accepts either a dictionary of header -> value which does exact matching on the pairs, 
+	Accepts either a dictionary of header -> value which does exact matching on the pairs,
 	or a filter function which takes a dict as input and returns if that row should be included'''
 		if isinstance(filterFunction, dict):
-			return self.select(i for i in range(len(self)) if all(self.column(k)[i] == v for k, v in filterFunction.iteritems()))
+			return self.select(i for i in range(len(self)) if all(self.column(k)[i] == v for k, v in filterFunction.items()))
 		return DataTable(line for line in self if filterFunction(line))
 	def __len__(self):
 		'''The number of rows'''
@@ -260,7 +260,7 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 		selfNewHeaders = {h: None for h in other.headers() if h not in self.headers()}
 		otherNewHeaders = {h: None for h in self.headers() if h not in other.headers()}
 		return (self & selfNewHeaders) + (other & otherNewHeaders)
-	def append(self, other):
+	def __iadd__(self, other):
 		'''Join two DataTable instances (concatenate their rows)
 	requires that the headers match (or that one of self or other be empty)'''
 		if other is None:
@@ -285,12 +285,11 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 					self.__headers[h] = DataColumn(self, h, list(self.__headers[h]) + [other[h]])
 			self.__length = self.__length + 1
 		else:
-			print "other instance unknown: %s" % other.__class__
-			raise NotImplemented
+			print("other instance unknown: %s" % other.__class__)
+			raise NotImplemented()
 		return self
-	__iadd__ = append
-	__add__ = _copyAndApplyOp(append)
-	def remove(self, other):
+	append = __add__ = _copyAndApplyOp(__iadd__)
+	def __isub__(self, other):
 		'''remove the rows from other that are in self - uses exact match of rows'''
 		if isinstance(other, dict):
 			other = [other]
@@ -299,9 +298,8 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 			self.__headers[c.header] = DataColumn(self, c.header, [c[i] for i in indices])
 		self.__length = len(indices)
 		return self
-	__isub__ = remove
-	__sub__ = _copyAndApplyOp(remove)
-	def extend(self, other):
+	remove = __sub__ = _copyAndApplyOp(__isub__)
+	def __iand__(self, other):
 		'''Add columns to the data tabel using the dictionary keys from other as the new headers and their values as fields on each row
 Overwrites existing columns'''
 		if hasattr(other, '__call__'):
@@ -321,16 +319,15 @@ Overwrites existing columns'''
 				data = [value] * len(self)
 			self.__headers[header] = DataColumn(self, header, data)
 		return self
-	__iand__ = extend
-	__and__ = _copyAndApplyOp(extend)
+	extend = __and__ = _copyAndApplyOp(__iand__)
 	def __or__(self, other):
 		'''Pipes the DataTable into other
 	Calls other with an iterator for the rows in self'''
 		return other(iter(self))
-	def exclude(self, other):
+	def __ixor__(self, other):
 		'''remove column(s) from the data tabel'''
 		if '__call__' in dir(other):
-			for column in self.__headers.values():
+			for column in list(self.__headers.values()):
 				if other(column):
 					del self.__headers[column.header]
 			return self
@@ -341,45 +338,33 @@ Overwrites existing columns'''
 				continue
 			del self.__headers[key]
 		return self
-	__ixor__ = exclude
-	__xor__ = _copyAndApplyOp(exclude)
-	def project(self, other):
+	exclude = __xor__ = _copyAndApplyOp(__ixor__)
+	def __itruediv__(self, other):
 		'''return new DataTable with only the columns listed in other'''
 		if '__call__' in dir(other):
-			for column in self.__headers.values():
+			for column in list(self.__headers.values()):
 				if not other(column):
 					del self.__headers[column.header]
 			return self
 		if other in self.__headers:
 			other = [other]
-		for key in self.__headers.keys():
+		for key in list(self.__headers.keys()):
 			if key in other:
 				continue
 			del self.__headers[key]
 		return self
-	__idiv__ = project
-	__div__ = _copyAndApplyOp(project)
+	project = __truediv__ = _copyAndApplyOp(__itruediv__)
 	def removeBlankColumns(self):
 		'''returns a copy of this DataTable with all of the blank columns removed'''
-		blanks = [h for h, col in self.__headers.iteritems() if not any(col)]
-		return self ^ blanks
+		blanks = [h for h, col in self.__headers.items() if not any(col)]
+		return self.exclude(blanks)
 	def sorted(self, *fields):
-		data = range(len(self))
-		def mycmp(idx1, idx2):
-			for field in fields:
-				f1 = self.column(field)[idx1]
-				f2 = self.column(field)[idx2]
-				if f1 != f2:
-					if f1 is None:
-						return -1
-					if f2 is None:
-						return 1
-					return cmp(f1, f2)
-			return 0
-		data.sort(cmp = mycmp)
-		return self.select(data)
-	def sort(self, *fields):
 		'''returns a new copy of the data table sorted'''
+		def key(idx):
+			return tuple(self.column(field)[idx] for field in fields)
+		idxs = sorted(range(len(self)), key=key)
+		return self.select(idxs)
+	def sort(self, *fields):
 		other = self.sorted(*fields)
 		for h in self.__headers.keys():
 			self.__headers[h] = DataColumn(self, h, other.column(h))
@@ -389,7 +374,7 @@ Overwrites existing columns'''
 		for i in range(len(self)):
 			key = tuple(self.__headers[field][i] for field in fields)
 			buckets[key].append(i)
-		for key, indices in buckets.iteritems():
+		for key, indices in buckets.items():
 			yield key, self.select(indices)
 	def sizeOfBuckets(self, *fields):
 		'''Returns a dict of bucket -> number of items in the bucket'''
@@ -462,7 +447,7 @@ Parameters:
 				for otherRow in other:
 					key = tuple(otherRow[field] for field in joinParams.values())
 					if key not in seenKeys:
-						newRow = {joinParamReversed[k] if k in joinParamReversed else otherFieldPrefix+k: v for k, v in otherRow.iteritems()}
+						newRow = {joinParamReversed[k] if k in joinParamReversed else otherFieldPrefix+k: v for k, v in otherRow.items()}
 						for header in self.headers():
 							if header not in joinParams:
 								newRow[header] = None
@@ -503,7 +488,7 @@ Parameters:
 		'''Returns a new DataTable with the rows and columns swapped
 In the resulting table, the headers from the previous table will be in the 'Field' column,
 	then each row will be in the column Row0, Row1, ... RowN
-	optional rowID is either a column to be used as the row identifier (fields in that column become new column headers), 
+	optional rowID is either a column to be used as the row identifier (fields in that column become new column headers),
 or a method which takes a table (this table) and the row index and returns the column header corresponding with that row
 		'''
 		if rowID is None:
@@ -514,22 +499,22 @@ or a method which takes a table (this table) and the row index and returns the c
 			getRowID = lambda dataTable, i: dataTable[i][rowID]
 		else:
 			getRowID = rowID
-		return DataTable([DataColumn(None, 'Field', sorted(self.__headers.iterkeys()))] + 
-						[DataColumn(None, 
-								getRowID(self, i), 
-								(self.__headers[h][i] for h in sorted(self.__headers.iterkeys()))) for i in range(len(self))])
+		return DataTable([DataColumn(None, 'Field', sorted(self.__headers.keys()))] +
+						[DataColumn(None,
+								getRowID(self, i),
+								(self.__headers[h][i] for h in sorted(self.__headers.keys()))) for i in range(len(self))])
 	def aggregate(self, groupBy, aggregations={}):
 		'''return an aggregation of the data grouped by a given set of fields.
 Parameters:
 	groupBy - the set of fields to group
 	aggregations - a dict of field name -> aggregate method, where the method takes an intermediate DataTable
-		and returns the value for that field for that row. 
+		and returns the value for that field for that row.
 		'''
 		if not aggregations:
-			return (self / groupBy).distinct()
+			return self.project(groupBy).distinct()
 		return DataTable(
 				AttributeDict(zip(groupBy, key)) +
-				{field : aggMethod(bucket) for field, aggMethod in aggregations.iteritems()}
+				{field : aggMethod(bucket) for field, aggMethod in aggregations.items()}
 			for key, bucket in self.iterBucket(*groupBy)
 		).sorted(*groupBy)
 	def renameColumn(self, column, newName):

@@ -1,5 +1,5 @@
 '''
-Module for comparing data in two DataTables.  
+Module for comparing data in two DataTables.
 The main entry point is the diff method which takes the two tables and the list of headers which specifies the "primary key" for the tables
 
 diff returns a ResultSet instance which contains the difference data by primary key.
@@ -25,27 +25,27 @@ ResultSet contains a list of Result instances which represents the changes to a 
 '''
 
 from collections import defaultdict
-from datatable import DataTable, AttributeDict
+from datatable import DataTable
+from datatable_util import AttributeDict
 
 class Result:
 	'''
 	Result class representing the difference between rows for a given bucket
-Contains the key for this bucket (may be used to find the rows in the original files), 
+Contains the key for this bucket (may be used to find the rows in the original files),
 	those fields which changed with the from and to values, and the actual from and to rows
 	'''
-	def __init__(self, key, keyFields, fromRow, toRow):
+	def __init__(self, key, keyFields, diffFields, fromRow, toRow):
 		self.key = key
+		self.diffFields = diffFields
 		self.fromRow = fromRow
 		self.toRow = toRow
 		self.__dict__.update(dict(zip(keyFields,  key)))
 		self.__data = {}
 		if fromRow and toRow and len(fromRow) == 1 and len(toRow) == 1:
 			#extract the fields that are different between the two runs
-			f = fromRow[0]
-			t = toRow[0]
-			for h in f.keys():
-				if f[h] != t[h]:
-					self.__data[h] = {'From':f[h], 'To':t[h]}
+			for i, (f, t) in enumerate(zip(fromRow[0], toRow[0])):
+				if f != t:
+					self.__data[i] = f, t
 	def __eq__(self,  other):
 		if isinstance(other,  Result):
 			return self.key == other.key and self.__data == other.__data
@@ -63,56 +63,88 @@ Contains the key for this bucket (may be used to find the rows in the original f
 			return cmp(self.key, other)
 	def comparable(self):
 		return bool(self.__data)
-	def __nonzero__(self):
+	def __bool__(self):
 		return bool(self.__data or self.fromRow is None or self.toRow is None or len(self.fromRow) != len(self.toRow))
 	def __getitem__(self, field):
-		return self.__data[field]
+		return self.__data[self.diffFields[field]]
 	def __contains__(self, field):
-		return field in self.__data
+		return self.diffFields[field] in self.__data
 	def __delitem__(self, field):
-		del self.__data[field]
+		del self.__data[self.diffFields[field]]
 	def ignoreField(self, field):
-		if field in self.__data:
-			del self.__data[field]
+		if field in self:
+			del self.__data[self.diffFields[field]]
 	def checkRemove(self, field, filterMethod):
 		'''
 		remove the field from the result if filterMethod returns true for the fromRow, toRow pairs
 field is the field to check
 filterMethod is a method which takes two parameters (the fromRow and toRow versions of the field) and returns if they can be removed from the result
 		'''
-		if field in self.__data:
-			f, t = self.__data[field]['From'], self.__data[field]['To']
+		fieldIdx = self.diffFields[field]
+		if fieldIdx in self.__data:
+			f, t = self.__data[fieldIdx]
 			if filterMethod(f, t):
-				del self.__data[field]
+				del self.__data[fieldIdx]
 	def checkRemove_multiField(self, filterMethod, *fields):
 		'''
 		remove the set of fields from the result if filterMethod returns true for those entries
 filterMethod is a method which takes two dicts: fromRow and toRow, with those fields specified by the fields parameter and returns if those values can be removed from the result
 fields is a list of fields to check and possibly remove
 		'''
-		if any(field not in self.__data for field in fields):
+		fieldIdxs = tuple((field, self.diffFields[field]) for field in fields)
+		if any(fieldIdx not in self.__data for field, fieldIdx in fieldIdxs):
 			return
-		fromRow, toRow = (AttributeDict((field, self.__data[field]['From']) for field in fields), AttributeDict((field, self.__data[field]['To']) for field in fields))
+		fromRow, toRow = (AttributeDict((field, self.__data[fieldIdx][i]) for field, fieldIdx in fieldIdxs) for i in (0, 1))
 		if filterMethod(fromRow, toRow):
-			for field in fields:
-				del self.__data[field]
+			for field, fieldIdx in fieldIdxs:
+				del self.__data[fieldIdx]
+	def customCheck(self, keyFields, filterMethod, *fieldsToRemove):
+		'''
+		remove the set of fields from result if filterMethod returns true for the original fromRow and toRow pair
+filterMethod is a method which takes two dicts: fromRow and toRow, with the data from the original from and to rows
+fields is the list of fields to remove when filterMethod returns true
+		'''
+		if not (self.fromRow and self.toRow and len(self.fromRow) == 1 and len(self.toRow) == 1):
+			return
+		fromRow = self.originalFromRows(keyFields)[0]
+		toRow = self.originalToRows(keyFields)[0]
+		if filterMethod(fromRow, toRow):
+			for fieldIdx in tuple(self.diffFields[field] for field in fieldsToRemove):
+				if fieldIdx in self.__data:
+					del self.__data[fieldIdx]
 	def __repr__(self):
 		return 'Result(%s) # from rows: %d, to rows: %d' % (repr(self.key), len(self.fromRow) if self.fromRow else 0, len(self.toRow) if self.toRow else 0)
 	def __str__(self):
 		if self.__data:
-			return '%s\t\t%s' % (self.key, self.__data)
+			return '%s\t\t%s' % (self.key, {field: self.__data[fieldIdx] for field, fieldIdx in self.diffFields.items() if fieldIdx in self.__data})
 		return '%s\tFrom: %s\tTo: %s' % (self.key, len(self.fromRow) if self.fromRow else 0, len(self.toRow) if self.toRow else 0)
 	def dataKeys(self):
-		return self.__data.keys()
+		return tuple(field for field, fieldIdx in self.diffFields.items() if fieldIdx in self.__data)
 	def getLengths(self):
 		return [len('%s' % k) for k in self.key]
 	def formatKeys(self, lengths):
 		return ', '.join(('% ' + str(l) + 's') % k for l, k in zip(lengths, self.key)) + ' |'
-		
+	def originalFromRows(self, keyFields):
+		return [
+			AttributeDict(
+				{field: fromRow[fieldIdx]
+					for field, fieldIdx in self.diffFields.items()
+				}
+			) + dict(zip(keyFields, self.key)) for fromRow in (self.fromRow or [])
+		]
+	def originalToRows(self, keyFields):
+		return [
+			AttributeDict(
+				{field: toRow[fieldIdx]
+					for field, fieldIdx in self.diffFields.items()
+				}
+			) + dict(zip(keyFields, self.key)) for toRow in (self.toRow or [])
+		]
+
 class ResultSet:
 	'''
-	ResultSet class representing the complete set of diff results.  
-Each bucket in either table is represented by a Result instance.  
+	ResultSet class representing the complete set of diff results.
+Each bucket in either table is represented by a Result instance.
 Provides filtering, iterating over the results and pretty-printing.
 	'''
 	def __init__(self, keyFields):
@@ -135,7 +167,9 @@ Provides filtering, iterating over the results and pretty-printing.
 			for result in rList:
 				yield result
 	def __getitem__(self,  key):
-		return self.__data[key]
+		if key in self.__data:
+			return self.__data[key]
+		raise KeyError(key)
 	def __delitem__(self,  key):
 		if isinstance(key,  Result):
 			self.__data[key.key].remove(key)
@@ -153,7 +187,7 @@ Provides filtering, iterating over the results and pretty-printing.
 		return '\n'.join(tempIter())
 	def printFormatted(self):
 		for line in _formatResults(self):
-			print line
+			print(line)
 	def maxKeyLengths(self):
 		candidates = [self.keyFields] + [result.key for result in self]
 		return [max(len('%s' % row[i]) for row in candidates) for i in range(len(self.keyFields))]
@@ -161,7 +195,7 @@ Provides filtering, iterating over the results and pretty-printing.
 		return ', '.join(('% ' + str(l) + 's') % k for l, k in zip(lengths, self.keyFields)) + ' |'
 	def pick(self):
 		'''Returns a (somewhat) random result object'''
-		return self.__data.itervalues().next()[0]
+		return iter(self.__data.values()).next()[0]
 	def ignoreField(self, field):
 		for result in list(self):
 			result.ignoreField(field)
@@ -169,7 +203,7 @@ Provides filtering, iterating over the results and pretty-printing.
 				del self[result]
 	def changedFields(self):
 		'''return the list of fields which changed'''
-		return sorted(set(h for result in self for h in result.dataKeys()))
+		return sorted({h for result in self for h in result.dataKeys()})
 	def checkRemove(self, field, filterMethod):
 		'''
 		remove the field from each result if filterMethod returns true for the fromRow, toRow pairs.  Removes any result which has no more inline differences
@@ -190,38 +224,61 @@ fields is a list of fields to check and possibly remove
 			result.checkRemove_multiField(filterMethod, *fields)
 			if not result:
 				del self[result]
+	def customCheck(self, filterMethod, *fieldsToRemove):
+		'''
+		remove the set of fields from each result if filterMethod returns true for the original fromRow and toRow pair.  Removes any result with no more inline differences
+filterMethod is a method which takes two dicts: fromRow and toRow, with the data from the original from and to rows
+fields is the list of fields to remove when filterMethod returns true
+		'''
+		for result in list(self):
+			result.customCheck(self.keyFields, filterMethod, *fieldsToRemove)
+			if not result:
+				del self[result]
 	def originalFromRows(self):
 		'''return the original rows being diffed from'''
-		return DataTable(row for result in self if result.fromRow for row in result.fromRow)
+		return DataTable(fromRow for result in self for fromRow in result.originalFromRows(self.keyFields))
 	def originalToRows(self):
 		'''return the original rows being diffed to'''
-		return DataTable(row for result in self if result.toRow for row in result.toRow)
+		return DataTable(toRow for result in self for toRow in result.originalToRows(self.keyFields))
+
+def _bucket(table, bucketHeaders, diffHeaders):
+	buckets = defaultdict(lambda : [])
+	for row in table:
+		key = tuple(row[h] for h in bucketHeaders)
+		value = tuple((row[h] if h in row else None) for h in diffHeaders)
+		buckets[key].append(value)
+	return buckets
 
 def diff(fromTable, toTable, buckets):
 	'''The base diff method - buckets the data and ships it off to the Result and ResultSet classes to check for in-line differences'''
 	#split the data into buckets
 	fromBucketHeaders, toBucketHeaders = ([b for b in buckets if b in table.headers()] for table in (fromTable, toTable))
-	fromSortHeaders, toSortHeaders = ([h for h in table.headers() if h not in bucketHeaders] for table, bucketHeaders in ((fromTable, fromBucketHeaders), (toTable, toBucketHeaders)))
-	
-	fromBuckets, toBuckets = (table.bucket(*bucketHeaders) for table, bucketHeaders in ((fromTable, fromBucketHeaders), (toTable, toBucketHeaders)))
+	commonOtherHeaders = list(set(fromTable.headers()).intersection(toTable.headers()).difference(buckets))
+	fromOtherHeaders, toOtherHeaders = ([h for h in table.headers() if h not in bucketHeaders and h not in commonOtherHeaders] for table, bucketHeaders in ((fromTable, fromBucketHeaders), (toTable, toBucketHeaders)))
+	diffHeaders = {h: i for i, h in enumerate(commonOtherHeaders + fromOtherHeaders + toOtherHeaders)}
+	diffHeadersList = [None] * len(diffHeaders)
+	for h, i in diffHeaders.items():
+		diffHeadersList[i] = h
+
+	fromBuckets, toBuckets = (_bucket(table, bucketHeaders, diffHeadersList) for table, bucketHeaders in ((fromTable, fromBucketHeaders), (toTable, toBucketHeaders)))
 	allKeys = set(fromBuckets.keys()).union(toBuckets.keys())
-	
+
 	results = ResultSet(buckets)
 	for key in allKeys:
 		if key in fromBuckets:
-			fromBucket = fromBuckets[key].sorted(*fromSortHeaders)
+			fromBucket = sorted(fromBuckets[key])
 		else:
 			fromBucket = None
 		if key in toBuckets:
-			toBucket = toBuckets[key].sorted(*toSortHeaders)
+			toBucket = sorted(toBuckets[key])
 		else:
 			toBucket = None
 		if fromBucket and toBucket and len(fromBucket) == len(toBucket):
 			for fromRow, toRow in zip(fromBucket, toBucket):
-				results += Result(key, buckets, DataTable([fromRow]), DataTable([toRow]))
+				results += Result(key, buckets, diffHeaders, [fromRow], [toRow])
 		else:
-			results += Result(key, buckets, fromBucket, toBucket)
-	
+			results += Result(key, buckets, diffHeaders, fromBucket, toBucket)
+
 	return results
 
 def _formatResults(results):
@@ -234,7 +291,7 @@ data lines:   bucket, field_from, field_to, field_from, field_to...
 		yield 'No results to compare'
 		return
 	mismatch = sorted(result for result in results if result.fromRow is None or result.toRow is None or len(result.fromRow) != len(result.toRow))
-	
+
 	keyMaxLengths = results.maxKeyLengths()
 	keyTotalSize = len(results.formatKeyFields(keyMaxLengths))
 	if mismatch:
@@ -251,22 +308,28 @@ data lines:   bucket, field_from, field_to, field_from, field_to...
 	resultList = []
 	maxLens = [keyTotalSize] + [0]*(len(headers)*2)
 	for i in range(len(headers)):
-		maxLens[i*2+1] = len(headers[i])
+		maxLens[i*2+1] = len(str(headers[i]))
 	for result in results:
-		buckets = [result.formatKeys(keyMaxLengths)]
+		buckets = (result.formatKeys(keyMaxLengths),)
 		for i, h in enumerate(headers):
 			if h in result:
-				maxLens[i*2+1] = max(maxLens[i*2+1], len(str(result[h]['From'])))
-				maxLens[i*2+2] = max(maxLens[i*2+2], len(str(result[h]['To'])))
-				buckets += [result[h]['From'], result[h]['To']]
+				maxLens[i*2+1] = max(maxLens[i*2+1], len(str(result[h][0])))
+				maxLens[i*2+2] = max(maxLens[i*2+2], len(str(result[h][1])))
+				buckets += result[h]
 			else:
-				buckets += ['', '']
+				buckets += '', ''
 		resultList.append(buckets)
 	maxLens = [str(m+1) for m in maxLens]
 	linePattern = '%-' + 's%-'.join(maxLens) + 's'
 	yield linePattern % ((results.formatKeyFields(keyMaxLengths),) + sum(((h,'') for h in headers), ()))
 	for result in resultList:
-		yield linePattern % tuple(result)
+		yield linePattern % result
 
 def formatResults(results):
 	return '\n'.join(_formatResults(results))
+
+def expectedChange(beforeValue, afterValue):
+	return lambda f, t: (f, t) == (beforeValue, afterValue)
+
+def fromNothingToNothing(f, t):
+	return not (f or t)

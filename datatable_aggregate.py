@@ -4,7 +4,7 @@ You are welcome to define your own methods (or callable classes), so long as the
 
 def first(it):
 	try:
-		return it.next()
+		return next(it)
 	except StopIteration:
 		return None
 
@@ -19,8 +19,8 @@ class First(AggregateMethod):
 		return bucket.column(self.field)[0]
 
 class FirstNonBlank(AggregateMethod):
-	def __call__(self, bucket): 
-		return (b for b in bucket.column(self.field) if b).next()
+	def __call__(self, bucket):
+		return next(b for b in bucket.column(self.field) if b)
 
 class Sum(AggregateMethod):
 	def __call__(self, bucket):

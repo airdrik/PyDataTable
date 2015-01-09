@@ -51,7 +51,7 @@ class DataColumn(object):
 			for row in self.__dataTable:
 				if value(row[self.header]):
 					yield row
-		elif '__contains__' in dir(value) and not isinstance(value, str) and not isinstance(value, unicode):
+		elif '__contains__' in dir(value) and not isinstance(value, str):
 			for row in self.__dataTable:
 				if row[self.header] in value:
 					yield row
@@ -146,7 +146,7 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 			self.__headers = {h: DataColumn(self, c) for h, c in data.__headers.items()}
 			self.__data = [AttributeDict((h.header, row[h.header]) for h in self.__headers.values()) for row in data]
 			return
-		if isinstance(data, str) or isinstance(data, unicode):
+		if isinstance(data, str):
 			data = parseMethod(data)
 		if not data:
 			self.__data = []
@@ -195,10 +195,10 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 		return sorted(self.__headers.keys())
 	def filter(self, filterFunction):
 		'''Returns a DataTable containing the lines in self filtered by the given filterFunciton
-	Accepts either a dictionary of header -> value which does exact matching on the pairs, 
+	Accepts either a dictionary of header -> value which does exact matching on the pairs,
 	or a filter function which takes a dict as input and returns if that row should be included'''
 		if isinstance(filterFunction, dict):
-			return DataTable(line for line in self.__data if all(line[k] == v for k, v in filterFunction.iteritems()))
+			return DataTable(line for line in self.__data if all(line[k] == v for k, v in filterFunction.items()))
 		return DataTable(line for line in self.__data if filterFunction(line))
 	def __len__(self):
 		'''The number of rows'''
@@ -229,7 +229,7 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 		selfNewHeaders = {h: None for h in other.headers() if h not in self.headers()}
 		otherNewHeaders = {h: None for h in self.headers() if h not in other.headers()}
 		return (self & selfNewHeaders) + (other & otherNewHeaders)
-	def append(self, other):
+	def __iadd__(self, other):
 		'''Join two DataTable instances (concatenate their rows)
 	requires that the headers match (or that one of self or other be empty)'''
 		if other is None:
@@ -248,12 +248,11 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 			elif other:
 				self.__data.append(other)
 		else:
-			print "other instance unknown: %s" % other.__class__
-			raise NotImplemented
+			print("other instance unknown: %s" % other.__class__)
+			raise NotImplemented()
 		return self
-	__iadd__ = append
-	__add__ = _copyAndApplyOp(append)
-	def remove(self, other):
+	append = __add__ = _copyAndApplyOp(__iadd__)
+	def __isub__(self, other):
 		'''remove the rows from other that are in self - uses exact match of rows'''
 		if isinstance(other, dict):
 			if other in self.__data:
@@ -263,16 +262,14 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 				if row in self.__data:
 					self.__data.remove(row)
 		return self
-	__isub__ = remove
-	__sub__ = _copyAndApplyOp(remove)
-	def extend(self, other):
+	remove = __sub__ = _copyAndApplyOp(__isub__)
+	def __iand__(self, other):
 		'''Add columns to the data tabel using the dictionary keys from other as the new headers and their values as fields on each row
 Overwrites existing columns'''
 		if hasattr(other, '__call__'):
 			if not self:
 				return self
-			newHeaders = other(self[0]).keys()
-			for newHeader in newHeaders:
+			for newHeader in other(self[0]).keys():
 				self.__headers[newHeader] = DataColumn(self, newHeader)
 			for row in self.__data:
 				row += other(row)
@@ -287,56 +284,49 @@ Overwrites existing columns'''
 				for row in self.__data:
 					row[header] = value
 		return self
-	__iand__ = extend
-	__and__ = _copyAndApplyOp(extend)
+	extend = __and__ = _copyAndApplyOp(__iand__)
 	def __or__(self, other):
 		'''Pipes the DataTable into other
 	Calls other with an iterator for the rows in self'''
 		return other(iter(self))
-	def exclude(self, other):
+	def __removeColumn(self, header):
+		del self.__headers[header]
+		for row in self.__data:
+			del row[header]
+	def __ixor__(self, other):
 		'''remove column(s) from the data tabel'''
 		if not self.__data:
 			return self
 		if '__call__' in dir(other):
-			for column in self.__headers.values():
+			for column in list(self.__headers.values()):
 				if other(column):
-					del self.__headers[column.header]
-					for row in self.__data:
-						del row[column.header]
+					self.__removeColumn(column.header)
 			return self
 		if other in self.__headers:
 			other = [other]
 		for key in other:
 			if key not in self.__headers:
 				continue
-			del self.__headers[key]
-			for row in self.__data:
-				del row[key]
+			self.__removeColumn(key)
 		return self
-	__ixor__ = exclude
-	__xor__ = _copyAndApplyOp(exclude)
-	def project(self, other):
+	exclude = __xor__ = _copyAndApplyOp(__ixor__)
+	def __itruediv__(self, other):
 		'''return new DataTable with only the columns listed in other'''
 		if not self.__data:
 			return self
 		if '__call__' in dir(other):
-			for column in self.__headers.values():
+			for column in list(self.__headers.values()):
 				if not other(column):
-					del self.__headers[column.header]
-					for row in self.__data:
-						del row[column.header]
+					self.__removeColumn(column.header)
 			return self
 		if other in self.__headers:
 			other = [other]
-		for key in self.__headers.keys():
+		for key in list(self.__headers.keys()):
 			if key in other:
 				continue
-			del self.__headers[key]
-			for row in self.__data:
-				del row[key]
+			self.__removeColumn(key)
 		return self
-	__idiv__ = project
-	__div__ = _copyAndApplyOp(project)
+	project = __truediv__ = _copyAndApplyOp(__itruediv__)
 	def removeBlankColumns(self):
 		'''returns a copy of this DataTable with all of the blank columns removed'''
 		headers = set(self.headers())
@@ -349,18 +339,11 @@ Overwrites existing columns'''
 				headers.difference_update(nonBlanks)
 				if not headers:
 					return
-		return self ^ headers
+		return self.exclude(headers)
 	def sort(self, *fields):
-		def mycmp(row1, row2):
-			for field in fields:
-				if row1[field] != row2[field]:
-					if row1[field] is None:
-						return -1
-					if row2[field] is None:
-						return 1
-					return cmp(row1[field], row2[field])
-			return 0
-		self.__data.sort(cmp = mycmp)
+		def key(row):
+			return tuple(row.get(field, None) for field in fields)
+		self.__data.sort(key=key)
 	sorted = _copyAndApplyOp(sort)
 	sorted.__doc__ = '''returns a new copy of the data table sorted'''
 	def iterBucket(self, *fields):
@@ -372,7 +355,7 @@ Overwrites existing columns'''
 			if currentKey is not None and key != currentKey:
 				yield currentKey, DataTable(currentBucket)
 				currentBucket = []
-				currentKey = key
+			currentKey = key
 			currentBucket.append(data)
 		yield currentKey, DataTable(currentBucket)
 	def sizeOfBuckets(self, *fields):
@@ -388,7 +371,7 @@ Overwrites existing columns'''
 		for data in self.__data:
 			key = tuple(data[field] for field in fields)
 			buckets[key].append(data)
-		return AttributeDict((key, DataTable(bucket)) for key, bucket in buckets.iteritems())
+		return AttributeDict((key, DataTable(bucket)) for key, bucket in buckets.items())
 	def filterBucket(self, predicate, *fields):
 		'''Filter the datatable using an aggregate predicate
 fields specifies how the data will be grouped
@@ -450,7 +433,7 @@ Parameters:
 				for otherRow in other:
 					key = tuple(otherRow[field] for field in joinParams.values())
 					if key not in seenKeys:
-						newRow = {joinParamReversed[k] if k in joinParamReversed else otherFieldPrefix+k: v for k, v in otherRow.iteritems()}
+						newRow = {joinParamReversed[k] if k in joinParamReversed else otherFieldPrefix+k: v for k, v in otherRow.items()}
 						for header in self.headers():
 							if header not in joinParams:
 								newRow[header] = None
@@ -493,7 +476,7 @@ Parameters:
 		'''Returns a new DataTable with the rows and columns swapped
 In the resulting table, the headers from the previous table will be in the 'Field' column,
 	then each row will be in the column Row0, Row1, ... RowN
-	optional rowID is either a column to be used as the row identifier (fields in that column become new column headers), 
+	optional rowID is either a column to be used as the row identifier (fields in that column become new column headers),
 or a method which takes a table (this table) and the row index and returns the column header corresponding with that row
 		'''
 		if rowID is None:
@@ -506,7 +489,7 @@ or a method which takes a table (this table) and the row index and returns the c
 			getRowID = rowID
 		rowIDs = [getRowID(self, i) for i in range(len(self))]
 		def tempIterRows():
-			for header,  column in sorted(self.__headers.iteritems()):
+			for header,  column in sorted(self.__headers.items()):
 				row = AttributeDict(zip(rowIDs, column))
 				row['Field'] = header
 				yield row
@@ -516,13 +499,13 @@ or a method which takes a table (this table) and the row index and returns the c
 Parameters:
 	groupBy - the set of fields to group
 	aggregations - a dict of field name -> aggregate method, where the method takes an intermediate DataTable
-		and returns the value for that field for that row. 
+		and returns the value for that field for that row.
 		'''
 		if not aggregations:
-			return (self / groupBy).distinct()
-		DataTable(
-			AttributeDict(zip(groupBy, key)) + 
-			{field: aggMethod(bucket) for field, aggMethod in aggregations.iteritems()} 
+			return self.project(groupBy).distinct()
+		return DataTable(
+			AttributeDict(zip(groupBy, key)) +
+			{field: aggMethod(bucket) for field, aggMethod in aggregations.items()}
 				for key, bucket in self.iterBucket(*groupBy)
 		).sorted(*groupBy)
 	def renameColumn(self, column, newName):
@@ -546,11 +529,11 @@ Parameters:
 
 def diffToTable(diffResults, keyHeaders):
 	data = []
-	for k, v in diffResults.iteritems():
+	for k, v in diffResults.items():
 		if isinstance(v, dict):
-			for i in range(len(v.values()[0])):
+			for i in range(len(list(v.values())[0])):
 				d = dict(zip(keyHeaders, k))
-				d.update({h: r[i] for h, r in v.iteritems()})
+				d.update({h: r[i] for h, r in v.items()})
 				data.append(d)
 		else:
 			d = dict(zip(keyHeaders, k))
