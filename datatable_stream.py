@@ -1,22 +1,22 @@
 from collections import defaultdict, Counter
-from datatable_util import AttributeDict, CSV_GivenHeaders, FIXEDWIDTH
+from datatable_util import AttributeDict, CSV_GivenHeaders, FIXEDWIDTH, JoinType, sortKey
 from hierarchies import Hierarchy
 import os
-from datatable import DataTable, DataColumn, LEFT_OUTER_JOIN
+from datatable import DataTable, DataColumn
 from itertools import chain
 from functools import reduce
 
-def createColumnFilter(header, criteria):
+def createColumnFilter(criteria):
 	if criteria is None:
-		return lambda row: row[header] is None
+		return lambda value: value is None
 	if '__call__' in dir(criteria):
-		return lambda row: criteria(row[header])
+		return lambda value: criteria(value)
 	if isinstance(criteria, DataColumnStream):
 		otherValues = set(criteria)
-		return lambda row: row[header] in otherValues
+		return lambda value: value in otherValues
 	if '__contains__' in dir(criteria) and not isinstance(criteria, str):
-		return lambda row: row[header] in criteria
-	return lambda row: row[header] == criteria
+		return lambda value: value in criteria
+	return lambda value: value == criteria
 
 class KeyParamedDefaultDict(dict):
 	def __init__(self, defaultMethod, *args, **kwargs):
@@ -39,7 +39,12 @@ class DataColumnStream(object):
 			yield row[self.header]
 	def __getitem__(self, index):
 		'''Gets the index'th row of data'''
-		return self.__dataTableStream[index].column(self.header)
+		if '__iter__' in dir(index) or isinstance(index, slice):
+			return self.__dataTableStream[index].column(self.header)
+		for i, v in enumerate(self):
+			if i == index:
+				return v
+		return None
 	def toList(self):
 		return list(self)
 	def first(self):
@@ -67,7 +72,7 @@ Value may be one of the following:
 	collection - returns rows where column value is in the collection
 	value - returns rows where column value equals the given value
 '''
-		criteria = createColumnFilter(self.header, value)
+		criteria = createColumnFilter(value)
 		return DataTableStream((row for row in self.__dataTableStream if criteria(row[self.header])), self.__dataTableStream.headers())
 	def set(self, value):
 		'''
@@ -102,7 +107,10 @@ class DataTableStream(object):
 		elif isinstance(index, slice):
 			criteria = lambda i: index.start <= i <= index.stop and (i - index.start) % index.step == 0
 		else:
-			criteria = lambda i: i == index
+			for i, row in enumerate(self):
+				if i == index:
+					return row
+			return None
 		return DataTableStream((row for i, row in enumerate(self) if criteria(i)), self.__headers)
 	def column(self, header):
 		'''Gets the column named 'header' (same as dataTable.<header>)'''
@@ -120,7 +128,7 @@ class DataTableStream(object):
 	Accepts either a dictionary of header -> value which does exact matching on the pairs,
 	or a filter function which takes a dict as input and returns if that row should be included'''
 		if isinstance(filterFunction, dict):
-			filters = {k: createColumnFilter(k, v) for k, v in filterFunction.items()}
+			filters = {k: createColumnFilter(v) for k, v in filterFunction.items()}
 			criteria = lambda row: all(v(row[k]) for k, v in filters)
 		else:
 			criteria = filterFunction
@@ -218,7 +226,7 @@ Overwrites existing columns'''
 		return self.project(lambda header, values: any(values))
 	def sorted(self, *fields):
 		def key(row):
-			return tuple(row.get(field, None) for field in fields)
+			return tuple(sortKey(row.get(field, None)) for field in fields)
 		return DataTable(sorted(self, key=key))
 	def iterBucket(self, *fields):
 		copy = self.sorted(*fields)
@@ -248,7 +256,7 @@ fields specifies how the data will be grouped
 predicate is a method which takes a bucket of data and returns if the bucket should be included in the result
 '''
 		return DataTableStream(row for key, bucket in self.iterBucket(*fields) if predicate(bucket) for row in bucket)
-	def join(self, other, joinParams=None, otherFieldPrefix='', joinType=LEFT_OUTER_JOIN):
+	def join(self, other, joinParams=None, otherFieldPrefix='', joinType=JoinType.LEFT_OUTER_JOIN):
 		'''
 dataTable.join(otherTable, joinParams, otherFieldPrefix='')
 	returns a new table with rows in the first table joined with rows in the second table, using joinParams to map fields in the first to fields in the second
@@ -262,7 +270,7 @@ Parameters:
 			joinParams = {h: h for h in self.headers() if h in other.headers()}
 		elif not isinstance(joinParams, dict):
 			raise Exception("joinParams must be a dictionary of <field in self> to <field in other>")
-		selfJoinHeaders = sorted(joinParams.values())
+		selfJoinHeaders = list(joinParams.values())
 		otherJoinHeaders = [joinParams[h] for h in selfJoinHeaders]
 
 		newOtherHeaders = {(v if v in joinParams.values() else otherFieldPrefix + v) for v in otherJoinHeaders}
@@ -354,13 +362,14 @@ or a method which takes a table (this table) and the row index and returns the c
 		else:
 			rowIDs = [rowID(row, i) for i, row in enumerate(origData)]
 		def tempIterRows():
-			for header in sorted(self.__headers):
+			for header in sorted(self.__headers, key=sortKey):
 				row = {rowId: row[header] for rowId, row in zip(rowIDs, origData)}
 				row['Field'] = header
 				yield row
 		return DataTableStream(tempIterRows(), rowIDs)
 	def aggregate(self, groupBy, aggregations={}):
 		'''return an aggregation of the data grouped by a given set of fields.
+	Must processe the whole stream before it will start streaming resulting rows
 Parameters:
 	groupBy - the set of fields to group
 	aggregations - a dict of field name -> aggregate method, where the method takes an intermediate DataTable
@@ -368,12 +377,18 @@ Parameters:
 		'''
 		if not aggregations:
 			return self.project(groupBy).distinct()
-		return DataTableStream(
-			(AttributeDict(zip(groupBy, key)) +
-			{field: aggMethod(bucket) for field, aggMethod in aggregations.items()}
-				for key, bucket in self.iterBucket(*groupBy))
-			, set(groupBy).union(aggregations.keys())
-		)
+		def tempIterRows():
+			accumulatedRows = {}
+			for row in self:
+				key = tuple(row[field] for field in groupBy)
+				if key not in accumulatedRows:
+					accumulatedRows[key] = {a: agg.newBucket(row) for a, agg in aggregations.items()}
+				accRow = accumulatedRows[key]
+				for a, agg in aggregations.items():
+					accRow[a] = agg.addRow(row, accRow[a])
+			for key, accRow in sorted(accumulatedRows.items()):
+				yield AttributeDict(zip(groupBy, key)) + {a: agg.finalize(accRow[a]) for a, agg in aggregations.items()}
+		return DataTableStream(tempIterRows(), set(groupBy).union(aggregations.keys()))
 	def renameColumn(self, column, newName):
 		'''rename the column in place'''
 		swap = lambda h: h if h != column else newName

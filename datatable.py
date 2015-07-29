@@ -1,18 +1,10 @@
 from collections import defaultdict
-from datatable_util import AttributeDict, DataTableException, CSV_GivenHeaders, FIXEDWIDTH
+from datatable_util import AttributeDict, DataTableException, CSV_GivenHeaders, FIXEDWIDTH, JoinType, sortKey
 from hierarchies import Hierarchy
+from functools import total_ordering
 import os
 
-class JoinType:
-	def __init__(self, leftOuter, rightOuter):
-		self.leftOuter = leftOuter
-		self.rightOuter = rightOuter
-
-INNER_JOIN = JoinType(False, False)
-RIGHT_OUTER_JOIN = JoinType(False, True)
-LEFT_OUTER_JOIN = JoinType(True, False)
-OUTER_JOIN = JoinType(True, True)
-
+@total_ordering
 class DataColumn(object):
 	def __init__(self, dataTable, header):
 		self.__dataTable = dataTable
@@ -24,6 +16,10 @@ class DataColumn(object):
 		if not isinstance(other, DataColumn):
 			return False
 		return self.__dataTable == other.__dataTable and self.header == other.header
+	def __lt__(self, other):
+		if not isinstance(other, DataColumn) or self.__dataTable is not other.__dataTable:
+			raise NotImplemented()
+		return sortKey(self.header) < sortKey(other.header)
 	def __iter__(self):
 		for row in self.__dataTable:
 			yield row[self.header]
@@ -159,7 +155,7 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 			return
 		if isinstance(data[0], dict):
 			headers = {k for row in data for k in row.keys()}
-			self.__headers = {h: DataColumn(self, h) for h in sorted(headers)}
+			self.__headers = {h: DataColumn(self, h) for h in headers}
 			for row in data:
 				for header in self.__headers.keys():
 					if header not in row:
@@ -192,7 +188,7 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 		return sorted(self.__headers.values())
 	def headers(self):
 		'''Returns this table's header strings'''
-		return sorted(self.__headers.keys())
+		return sorted(self.__headers.keys(), key=sortKey)
 	def filter(self, filterFunction):
 		'''Returns a DataTable containing the lines in self filtered by the given filterFunciton
 	Accepts either a dictionary of header -> value which does exact matching on the pairs,
@@ -239,12 +235,12 @@ A string which may be parsed into one of the previous by calling parseMethod on 
 				raise DataTableException("headers don't match.  Expected: " + str(self.headers()) + "\nFound: " + str(other.headers()))
 			self.__data += other.__data
 		elif isinstance(other, list):
-			if other and self.headers() != sorted(other[0].keys()):
-				raise DataTableException("headers don't match.  Expected: " + str(self.headers()) + "\nFound: " + str(sorted(other[0].keys())))
+			if other and self.headers() != sorted(other[0].keys(), key=sortKey):
+				raise DataTableException("headers don't match.  Expected: " + str(self.headers()) + "\nFound: " + str(sorted(other[0].keys(), key=sortKey)))
 			self.__data += other
 		elif isinstance(other, dict):
-			if self.headers() and other and self.headers() != sorted(other.keys()):
-				raise DataTableException("headers don't match.  Expected: " + str(self.headers()) + "\nFound: " + str(sorted(other.keys())))
+			if self.headers() and other and self.headers() != sorted(other.keys(), key=sortKey):
+				raise DataTableException("headers don't match.  Expected: " + str(self.headers()) + "\nFound: " + str(sorted(other.keys(), key=sortKey)))
 			elif other:
 				self.__data.append(other)
 		else:
@@ -342,7 +338,7 @@ Overwrites existing columns'''
 		return self.exclude(headers)
 	def sort(self, *fields):
 		def key(row):
-			return tuple(row.get(field, None) for field in fields)
+			return tuple(sortKey(row.get(field, None)) for field in fields)
 		self.__data.sort(key=key)
 	sorted = _copyAndApplyOp(sort)
 	sorted.__doc__ = '''returns a new copy of the data table sorted'''
@@ -378,7 +374,7 @@ fields specifies how the data will be grouped
 predicate is a method which takes a bucket of data and returns if the bucket should be included in the result
 '''
 		return DataTable.collect(bucket for key, bucket in self.iterBucket(*fields) if predicate(bucket))
-	def join(self, other, joinParams=None, otherFieldPrefix='', joinType=LEFT_OUTER_JOIN):
+	def join(self, other, joinParams=None, otherFieldPrefix='', joinType=JoinType.LEFT_OUTER_JOIN):
 		'''
 dataTable.join(otherTable, joinParams, otherFieldPrefix='')
 	returns a new table with rows in the first table joined with rows in the second table, using joinParams to map fields in the first to fields in the second
@@ -394,11 +390,11 @@ Parameters:
 			raise Exception("joinParams must be a dictionary of <field in self> to <field in other>")
 
 		if not other:
-			if not self or joinType in (INNER_JOIN, RIGHT_OUTER_JOIN):
+			if not self or not joinType.leftOuter:
 				return DataTable()
 			return self & {otherFieldPrefix + v: None for v in other.headers() if v not in joinParams.values()}
 		if not self:
-			if joinType in (INNER_JOIN, LEFT_OUTER_JOIN):
+			if not joinType.rightOuter:
 				return DataTable()
 			other = DataTable(other)
 			for header in other.headers():
@@ -406,9 +402,7 @@ Parameters:
 					other.renameColumn(header, otherFieldPrefix + header)
 			return other & {header: None for header in self.headers() if header not in joinParams}
 
-		newHeaders = other.headers()
-		for header in joinParams.values():
-			newHeaders.remove(header)
+		newHeaders = [h for h in other.headers() if h not in joinParams.values()]
 
 		otherBuckets = other.bucket(*joinParams.values())
 		def tempJoin():
@@ -489,9 +483,9 @@ or a method which takes a table (this table) and the row index and returns the c
 			getRowID = rowID
 		rowIDs = [getRowID(self, i) for i in range(len(self))]
 		def tempIterRows():
-			for header,  column in sorted(self.__headers.items()):
+			for column in self.columns():
 				row = AttributeDict(zip(rowIDs, column))
-				row['Field'] = header
+				row['Field'] = column.header
 				yield row
 		return DataTable(tempIterRows())
 	def aggregate(self, groupBy, aggregations={}):
@@ -503,11 +497,18 @@ Parameters:
 		'''
 		if not aggregations:
 			return self.project(groupBy).distinct()
-		return DataTable(
-			AttributeDict(zip(groupBy, key)) +
-			{field: aggMethod(bucket) for field, aggMethod in aggregations.items()}
-				for key, bucket in self.iterBucket(*groupBy)
-		).sorted(*groupBy)
+		accumulatedRows = {}
+		for row in self:
+			key = tuple(row[field] for field in groupBy)
+			if key not in accumulatedRows:
+				accumulatedRows[key] = {a: agg.newBucket(row) for a, agg in aggregations.items()}
+			accRow = accumulatedRows[key]
+			for a, agg in aggregations.items():
+				accRow[a] = agg.addRow(row, accRow[a])
+		newData = []
+		for key, accRow in sorted(accumulatedRows.items()):
+			newData.append(AttributeDict(zip(groupBy, key)) + {a: agg.finalize(accRow[a]) for a, agg in aggregations.items()})
+		return DataTable(newData)
 	def renameColumn(self, column, newName):
 		'''rename the column in place'''
 		for row in self:

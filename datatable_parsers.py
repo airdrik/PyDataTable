@@ -40,6 +40,22 @@ def fromXML(s):
 	'''
 	return DataTable(row.attrs for row in BeautifulSoup(s).find_child('row'))
 
+def _fromHtmlTable(table):
+	headers = [str(th.string) for th in table.tr.findChildren('th')]
+	rows = [[str(td.string) for td in tr.findChildren('td')] for tr in table.findChildren('tr') if tr.td]
+	return DataTable([headers] + rows)
+	
+def fromHtmlTable(s):
+	bs = BeautifulSoup(s)
+	tables = bs.find_all('table')
+	def it():
+		for table in tables:
+			yield _fromHtmlTable(table)
+	results = list(it())
+	if len(results) == 1:
+		return results[0]
+	return results
+
 def fromCursor(cur, scrub=None, customScrub=None, indexedResults=False, index=None):
 	'''Expects cur to be a pysql 2.0 - style cursor and returns a (list of) DataTable(s) with the results
 	optional parameter scrub is a method which is called for each header (row from cursor.description) to return a replace method
@@ -78,7 +94,7 @@ def fromCursor(cur, scrub=None, customScrub=None, indexedResults=False, index=No
 				if h not in d or d[h] is None:
 					d[h] = row[i]
 				elif row[i] and row[i] != d[h]:
-					print 'WARNING: query returned multiple columns with the same name (%s) with conflicting data.  Taking the data from the first returned column' % h
+					print('WARNING: query returned multiple columns with the same name (%s) with conflicting data.  Taking the data from the first returned column' % h)
 			return d
 		theData = [zipHeaders(row) for row in cur.fetchall()]
 		if scrub is not None:

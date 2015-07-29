@@ -1,4 +1,17 @@
 import os
+import enum
+
+class JoinType(enum.Enum):
+	def __init__(self, leftOuter, rightOuter):
+		self.leftOuter = leftOuter
+		self.rightOuter = rightOuter
+	INNER_JOIN = False, False
+	RIGHT_OUTER_JOIN = False, True
+	LEFT_OUTER_JOIN = True, False
+	OUTER_JOIN = True, True
+
+def sortKey(it):
+	return hash(type(it)), it
 
 class AttributeDict(dict):
 	'''
@@ -9,7 +22,11 @@ print d.a # 1
 	'''
 	def __init__(self, *args, **vargs):
 		super(AttributeDict, self).__init__(*args, **vargs)
-	__getattr__ = dict.__getitem__
+	def __getattr__(self, attr):
+		try:
+			return self[attr]
+		except KeyError as e:
+			raise AttributeError(*e.args)
 	__setattr__ = dict.__setitem__
 	def __dir__(self):
 		return list(self.__dict__.keys()) + [str(key) for key in self.keys()]
@@ -20,6 +37,8 @@ print d.a # 1
 		d = AttributeDict(self)
 		d += other
 		return d
+	def filter(self, filterFunction):
+		return AttributeDict({k:v for k, v in self.items() if filterFunction(k, v)})
 
 class DataTableException(Exception):
 	pass
@@ -97,7 +116,7 @@ print dt & convertColumns({'accountId': int, 'value': float, 'startDate': parseD
 instead of:
 print dt & {'accountId': lambda row: int(row.accountId), 'value': lambda row: float(row.value), 'startDate': lambda row: parseDate(row.startDate)}
 	'''
-	return {k: (lambda k: lambda row: v(row[k]))(k) for k,v in columnReplacements.items()}
+	return {k: (lambda k, v: lambda row: v(row[k]))(k, v) for k,v in columnReplacements.items()}
 
 def replaceNewLines(header, replacement='|'):
 	'''replaceNewLines(header)

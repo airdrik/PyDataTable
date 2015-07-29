@@ -26,8 +26,10 @@ ResultSet contains a list of Result instances which represents the changes to a 
 
 from collections import defaultdict
 from datatable import DataTable
-from datatable_util import AttributeDict
+from datatable_util import AttributeDict, sortKey
+from functools import total_ordering
 
+@total_ordering
 class Result:
 	'''
 	Result class representing the difference between rows for a given bucket
@@ -54,13 +56,20 @@ Contains the key for this bucket (may be used to find the rows in the original f
 		if isinstance(other,  dict):
 			return not any(self.__dict__[k] != other[k] for k in other.keys())
 		raise NotImplementedError
-	def __cmp__(self,  other):
+	def __lt__(self, other):
 		if self == other:
 			return 0
 		if isinstance(other, Result):
-			return cmp(self.key, other.key) and cmp(self.__data, other.__data)
+			def it():
+				yield self.key, other.key
+				for k in set(self.__data.keys()).union(other.__data.keys()):
+					yield self.__data.get(k), other.__data.get(k)
+			for s, o in it():
+				if s != o:
+					return tuple(sortKey(i) for i in s) < tuple(sortKey(i) for i in o)
+			return False
 		if isinstance(other, tuple):
-			return cmp(self.key, other)
+			return self.key < other
 	def comparable(self):
 		return bool(self.__data)
 	def __bool__(self):
@@ -163,9 +172,8 @@ Provides filtering, iterating over the results and pretty-printing.
 	def __len__(self):
 		return len(self.__data)
 	def __iter__(self):
-		for key, rList in sorted(self.__data.items()):
-			for result in rList:
-				yield result
+		for rList in self.__data.values():
+			yield from rList
 	def __getitem__(self,  key):
 		if key in self.__data:
 			return self.__data[key]
@@ -195,7 +203,7 @@ Provides filtering, iterating over the results and pretty-printing.
 		return ', '.join(('% ' + str(l) + 's') % k for l, k in zip(lengths, self.keyFields)) + ' |'
 	def pick(self):
 		'''Returns a (somewhat) random result object'''
-		return iter(self.__data.values()).next()[0]
+		return next(iter(self.__data.values()))[0]
 	def ignoreField(self, field):
 		for result in list(self):
 			result.ignoreField(field)
@@ -249,14 +257,19 @@ def _bucket(table, bucketHeaders, diffHeaders):
 		buckets[key].append(value)
 	return buckets
 
-def diff(fromTable, toTable, buckets):
+def sortRowKey(row):
+	return tuple(sortKey(v) for v in row)
+	
+def diff(fromTable, toTable, *buckets):
 	'''The base diff method - buckets the data and ships it off to the Result and ResultSet classes to check for in-line differences'''
 	#split the data into buckets
 	fromBucketHeaders, toBucketHeaders = ([b for b in buckets if b in table.headers()] for table in (fromTable, toTable))
 	commonOtherHeaders = list(set(fromTable.headers()).intersection(toTable.headers()).difference(buckets))
 	fromOtherHeaders, toOtherHeaders = ([h for h in table.headers() if h not in bucketHeaders and h not in commonOtherHeaders] for table, bucketHeaders in ((fromTable, fromBucketHeaders), (toTable, toBucketHeaders)))
+
 	diffHeaders = {h: i for i, h in enumerate(commonOtherHeaders + fromOtherHeaders + toOtherHeaders)}
 	diffHeadersList = [None] * len(diffHeaders)
+
 	for h, i in diffHeaders.items():
 		diffHeadersList[i] = h
 
@@ -266,11 +279,11 @@ def diff(fromTable, toTable, buckets):
 	results = ResultSet(buckets)
 	for key in allKeys:
 		if key in fromBuckets:
-			fromBucket = sorted(fromBuckets[key])
+			fromBucket = sorted(fromBuckets[key], key=sortRowKey)
 		else:
 			fromBucket = None
 		if key in toBuckets:
-			toBucket = sorted(toBuckets[key])
+			toBucket = sorted(toBuckets[key], key=sortRowKey)
 		else:
 			toBucket = None
 		if fromBucket and toBucket and len(fromBucket) == len(toBucket):
